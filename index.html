@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="مذاكر - تطبيق البطاقات التعليمية الذكي بالذكاء الاصطناعي">
+  <meta name="theme-color" content="#7C3AED">
+  <title>مذاكر</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <link rel="stylesheet" href="css/main.css">
+</head>
+<body data-theme="light">
+
+  <!-- Loading Screen -->
+  <div id="loading-screen" class="loading-screen">
+    <div class="loader-inner">
+      <div class="loader-glyph">م</div>
+      <p class="loader-name">مذاكر</p>
+      <div class="loader-track"><div id="loader-bar" class="loader-fill"></div></div>
+      <p class="loader-sub">جاري التحميل…</p>
+    </div>
+  </div>
+
+  <!-- App Shell -->
+  <div id="app" class="app hidden">
+
+    <!-- Sidebar -->
+    <nav id="sidebar" class="sidebar" role="navigation" aria-label="القائمة الرئيسية">
+      <div class="sidebar-top">
+        <div class="brand">
+          <span class="brand-glyph">م</span>
+          <span class="brand-name">مذاكر</span>
+        </div>
+        <button class="icon-btn sidebar-close" id="sidebar-close" aria-label="إغلاق القائمة">✕</button>
+      </div>
+
+      <!-- Streak badge -->
+      <div class="streak-bar" id="sidebar-streak">
+        <span class="streak-fire">🔥</span>
+        <span class="streak-count" id="streak-count">0</span>
+        <span class="streak-label">يوم متواصل</span>
+      </div>
+
+      <ul class="nav-list" role="list">
+        <li><a href="#dashboard" class="nav-link" data-view="dashboard">
+          <span class="nav-icon">📊</span><span>لوحة التحكم</span>
+        </a></li>
+        <li><a href="#subjects" class="nav-link" data-view="subjects">
+          <span class="nav-icon">📚</span><span>المواد الدراسية</span>
+        </a></li>
+
+        <li class="nav-section-label">التعلم</li>
+
+        <li><a href="#study" class="nav-link" data-view="study">
+          <span class="nav-icon">🎯</span><span>مراجعة اليوم</span>
+          <span class="nav-badge" id="nav-due-badge" style="display:none"></span>
+        </a></li>
+        <li><a href="#schedule" class="nav-link" data-view="schedule">
+          <span class="nav-icon">📅</span><span>جدولة المراجعات</span>
+        </a></li>
+        <li><a href="#flashcards" class="nav-link" data-view="flashcards">
+          <span class="nav-icon">🃏</span><span>البطاقات التعليمية</span>
+        </a></li>
+        <li><a href="#quiz" class="nav-link" data-view="quiz">
+          <span class="nav-icon">📝</span><span>الاختبار المدمج</span>
+        </a></li>
+
+        <li class="nav-section-label">أدوات</li>
+
+        <li><a href="#draw" class="nav-link" data-view="draw">
+          <span class="nav-icon">🎨</span><span>لوحة الرسم</span>
+        </a></li>
+        <li><a href="#pomodoro" class="nav-link" data-view="pomodoro">
+          <span class="nav-icon">⏱️</span><span>مؤقت بومودورو</span>
+        </a></li>
+        <li><a href="#chat" class="nav-link" data-view="chat">
+          <span class="nav-icon">🤖</span><span>المساعد الذكي</span>
+        </a></li>
+      </ul>
+
+      <div class="sidebar-foot">
+        <a href="#settings" class="nav-link" data-view="settings">
+          <span class="nav-icon">⚙️</span><span>الإعدادات</span>
+        </a>
+        <button class="theme-btn" id="theme-toggle" aria-label="تبديل المظهر">
+          <span class="theme-icon-light">☀️</span>
+          <span class="theme-icon-dark">🌙</span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- Mobile overlay -->
+    <div id="overlay" class="overlay" role="presentation"></div>
+
+    <!-- Main area -->
+    <main id="main" class="main-area" role="main">
+      <header class="topbar" role="banner">
+        <button class="icon-btn menu-btn" id="menu-btn" aria-label="فتح القائمة">
+          <svg width="22" height="16" viewBox="0 0 22 16" fill="none">
+            <rect width="22" height="2.5" rx="1.25" fill="currentColor"/>
+            <rect y="6.75" width="16" height="2.5" rx="1.25" fill="currentColor"/>
+            <rect y="13.5" width="22" height="2.5" rx="1.25" fill="currentColor"/>
+          </svg>
+        </button>
+        <h1 class="topbar-title" id="page-title">لوحة التحكم</h1>
+        <button class="theme-btn topbar-theme" id="theme-toggle-mob" aria-label="تبديل المظهر">
+          <span class="theme-icon-light">☀️</span>
+          <span class="theme-icon-dark">🌙</span>
+        </button>
+      </header>
+
+      <div id="view" class="view-container" role="region" aria-live="polite"></div>
+    </main>
+  </div>
+
+  <!-- Toasts -->
+  <div id="toasts" class="toast-stack" aria-live="assertive" aria-atomic="false"></div>
+
+  <!-- Confirm Dialog -->
+  <div id="modal-confirm" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal-box modal-sm">
+      <h3 class="modal-title" id="confirm-title">تأكيد</h3>
+      <p class="modal-msg" id="confirm-msg"></p>
+      <div class="modal-btns">
+        <button class="btn btn-danger" id="confirm-yes">تأكيد</button>
+        <button class="btn btn-ghost" id="confirm-no">إلغاء</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generic Modal -->
+  <div id="modal-form" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal-box modal-md" id="modal-form-box">
+      <div class="modal-head">
+        <h3 class="modal-title" id="modal-form-title">نموذج</h3>
+        <button class="icon-btn modal-close-btn" id="modal-form-close" aria-label="إغلاق">✕</button>
+      </div>
+      <div class="modal-body" id="modal-form-body"></div>
+    </div>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
