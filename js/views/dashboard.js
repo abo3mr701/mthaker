@@ -2,17 +2,18 @@
  * dashboard.js — Dashboard view
  */
 
-import { getDashboardStats, history as historyDB, flashcards as cardsDB } from '../db.js';
-import { formatDate, timeAgo, arabicCount } from '../utils/helpers.js';
+import { getDashboardStats, history as historyDB, flashcards as cardsDB, reviewPlans as plansDB } from '../db.js';
+import { formatDate, timeAgo, arabicCount, escHtml, todayStr } from '../utils/helpers.js';
 
 export async function renderDashboard(container) {
   container.innerHTML = `<div class="flex-center" style="padding:var(--s10)"><div class="spinner"></div></div>`;
 
-  let stats, recent;
+  let stats, recent, duePlans;
   try {
-    [stats, recent] = await Promise.all([
+    [stats, recent, duePlans] = await Promise.all([
       getDashboardStats(),
       historyDB.getRecent(10),
+      getPlansDueToday(),
     ]);
   } catch (err) {
     container.innerHTML = `<div class="empty-state"><p class="text-danger">خطأ في تحميل البيانات: ${err.message}</p></div>`;
@@ -113,6 +114,20 @@ export async function renderDashboard(container) {
         ${await renderRecentActivity(recent)}
       </div>
     </div>
+
+    <!-- Lessons due today (المراجعات) -->
+    ${duePlans.length > 0 ? `
+    <div class="card" style="margin-top:var(--s7);">
+      <h3 style="font-size:1rem;font-weight:700;margin-bottom:var(--s6);">🗓️ دروس تحتاج مراجعة اليوم</h3>
+      <div style="display:flex;flex-direction:column;gap:var(--s3);">
+        ${duePlans.map(p => `
+          <a href="#reviews" class="dash-due-plan-row">
+            <span>${escHtml(p.title)}</span>
+            <span class="dash-due-plan-badge">مراجعة رقم ${p.dueReviewIndex}</span>
+          </a>
+        `).join('')}
+      </div>
+    </div>` : ''}
   `;
 
   // Wire up quick-action buttons
@@ -182,4 +197,16 @@ function getGreeting() {
   if (h < 17) return 'مساء الخير! ☀️';
   if (h < 21) return 'مساء النور! 🌆';
   return 'طاب ليلك! 🌙';
+}
+
+/* ─── Lessons (خطط المراجعة) due today — surfaced right on the dashboard ── */
+async function getPlansDueToday() {
+  const plans = await plansDB.getAll();
+  const today = todayStr();
+  const due = [];
+  for (const p of plans) {
+    const idx = (p.reviews || []).findIndex(r => !r.done && r.dueDate <= today);
+    if (idx !== -1) due.push({ ...p, dueReviewIndex: idx + 1 });
+  }
+  return due;
 }
