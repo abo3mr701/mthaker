@@ -1143,8 +1143,8 @@ ul,ol { list-style:none; }
 /* ── 31. Review Plans (لوحة "المراجعات" — خطط الدروس) ────── */
 .review-plan-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-  gap: var(--s6);
+  grid-template-columns: 1fr;
+  gap: var(--s7);
 }
 .review-plan-card {
   background: var(--surface);
@@ -1205,7 +1205,7 @@ ul,ol { list-style:none; }
 .review-boxes-row {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: var(--s3);
+  gap: var(--s4);
   margin-bottom: var(--s6);
 }
 .review-box {
@@ -1213,7 +1213,7 @@ ul,ol { list-style:none; }
   background: var(--surface-alt);
   border: 1.5px solid var(--border);
   border-radius: var(--r3);
-  padding: var(--s4) var(--s3) var(--s3);
+  padding: var(--s5) var(--s4) var(--s4);
   text-align: center;
   transition: all var(--ease);
 }
@@ -1221,6 +1221,12 @@ ul,ol { list-style:none; }
   border-color: var(--success);
   background: var(--success-soft);
 }
+.review-box.due-today {
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, .12);
+  box-shadow: 0 0 0 1px #f59e0b inset;
+}
+.review-box.due-today .review-box-num { color: #f59e0b; }
 .review-box-check {
   position: absolute; top: var(--s3); inset-inline-start: var(--s3);
   width: 20px; height: 20px;
@@ -1236,13 +1242,13 @@ ul,ol { list-style:none; }
 .review-box.done .review-box-check {
   background: var(--success); border-color: var(--success);
 }
-.review-box-num { font-size: .75rem; font-weight: 700; color: var(--text2); margin-bottom: var(--s2); }
+.review-box-num { font-size: .82rem; font-weight: 700; color: var(--text2); margin-bottom: var(--s2); }
 .review-box-date {
-  font-size: .78rem; font-weight: 600; color: var(--text1);
-  cursor: pointer; border-radius: var(--r2); padding: var(--s1) var(--s2);
+  font-size: .86rem; font-weight: 600; color: var(--text1);
+  cursor: pointer; border-radius: var(--r2); padding: var(--s2) var(--s3);
 }
 .review-box-date:hover { background: var(--primary-soft); color: var(--primary); }
-.review-box-rel { font-size: .72rem; color: var(--text3); margin-top: var(--s1); }
+.review-box-rel { font-size: .76rem; color: var(--text3); margin-top: var(--s2); }
 .review-date-input {
   width: 100%; font-size: .78rem; padding: var(--s1);
   border: 1px solid var(--primary); border-radius: var(--r2);
@@ -1277,6 +1283,26 @@ ul,ol { list-style:none; }
   border-radius: var(--r2); color: var(--text1); font-family: var(--font);
 }
 .max-daily-note { font-size: .78rem; color: var(--warning); }
+.btn-warning-active {
+  background: #f59e0b; color: #1a1207; border: 1px solid #f59e0b; font-weight: 700;
+}
+.btn-warning-active:hover { background: #d97706; }
+.dash-due-plan-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--s4) var(--s5);
+  background: rgba(245, 158, 11, .08);
+  border: 1px solid rgba(245, 158, 11, .3);
+  border-radius: var(--r3);
+  color: var(--text1); text-decoration: none;
+  font-size: .88rem; font-weight: 600;
+  transition: background var(--ease);
+}
+.dash-due-plan-row:hover { background: rgba(245, 158, 11, .16); }
+.dash-due-plan-badge {
+  font-size: .74rem; font-weight: 700; color: #f59e0b;
+  background: rgba(245, 158, 11, .15);
+  padding: var(--s1) var(--s3); border-radius: var(--r-full);
+}
 
 /* ── 33. Category badges + TTS buttons ────────────────────── */
 .category-badge {
