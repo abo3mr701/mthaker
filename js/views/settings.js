@@ -11,15 +11,15 @@ import {
   history as historyDB_exp,
 } from '../db.js';
 import { validateApiKey } from '../services/gemini.js';
-import { getIntervals, saveIntervals, DEFAULT_INTERVALS } from '../services/srs.js';
+import { getMaxDailyReviews, setMaxDailyReviews } from '../services/srs.js';
 import { showToast, showConfirm, escHtml } from '../utils/helpers.js';
 
 export async function renderSettings(container) {
   container.innerHTML = `<div class="flex-center" style="padding:var(--s10)"><div class="spinner"></div></div>`;
 
-  const [apiKey, intervals, studyMins, breakMins] = await Promise.all([
+  const [apiKey, maxDaily, studyMins, breakMins] = await Promise.all([
     settingsDB.get('geminiApiKey'),
-    getIntervals(),
+    getMaxDailyReviews(),
     settingsDB.get('pomodoroStudy'),
     settingsDB.get('pomodoroBreak'),
   ]);
@@ -63,22 +63,22 @@ export async function renderSettings(container) {
       </div>
     </div>
 
-    <!-- SRS Intervals -->
+    <!-- Review algorithm settings -->
     <div class="settings-section">
       <div class="settings-section-title">
-        <span class="settings-section-icon">📅</span> فترات المراجعة المتباعدة (SRS)
+        <span class="settings-section-icon">📅</span> خوارزمية المراجعة (SRS)
       </div>
       <p class="text-muted text-sm mb-4">
-        حدد عدد الأيام بين كل مرحلة مراجعة. البطاقة تتقدم عند الإجابة الصحيحة وترجع عند الخطأ.
+        الإجابة الصحيحة تُضاعف الفاصل الزمني حسب معامل السهولة الخاص بكل بطاقة، والإجابة الخاطئة
+        تعيد البطاقة لليوم التالي وترفع عداد أخطائها. يمكن أيضاً تعديل الحد الأقصى للمراجعات اليومية
+        مباشرة من صفحة «مراجعة البطاقات» نفسها.
       </p>
-      <div id="srs-intervals-list" class="srs-intervals-list">
-        ${renderIntervalsUI(intervals)}
+      <div class="form-group" style="max-width:280px;">
+        <label class="form-label">🎚️ الحد الأقصى للمراجعات اليومية</label>
+        <input type="number" class="form-input" id="max-daily-setting" min="0" step="5" value="${maxDaily}">
+        <span class="form-hint">0 = بلا حد (تظهر كل البطاقات المستحقة دفعة واحدة).</span>
       </div>
-      <div style="display:flex;gap:var(--s4);flex-wrap:wrap;">
-        <button class="btn btn-secondary btn-sm" id="add-interval-btn">➕ إضافة مرحلة</button>
-        <button class="btn btn-primary btn-sm" id="save-intervals-btn">💾 حفظ الفترات</button>
-        <button class="btn btn-ghost btn-sm" id="reset-intervals-btn">↺ إعادة للافتراضي</button>
-      </div>
+      <button class="btn btn-primary btn-sm" id="save-max-daily-btn">💾 حفظ</button>
     </div>
 
     <!-- Theme -->
@@ -119,28 +119,11 @@ export async function renderSettings(container) {
     </div>
   `;
 
-  bindSettingsEvents(container, apiKey, intervals);
-}
-
-/* ─── SRS Intervals UI ───────────────────────────────────── */
-function renderIntervalsUI(intervals) {
-  return intervals.map((days, i) => `
-    <div class="srs-interval-row" data-index="${i}">
-      <span class="srs-interval-label">المرحلة ${i + 1}</span>
-      <input type="number" class="srs-interval-input"
-        min="1" max="365" value="${days}"
-        aria-label="أيام المرحلة ${i + 1}">
-      <span class="srs-unit">يوم</span>
-      ${intervals.length > 1
-        ? `<button class="btn btn-danger btn-sm btn-icon-only remove-interval" data-index="${i}" title="حذف">✕</button>`
-        : ''
-      }
-    </div>
-  `).join('');
+  bindSettingsEvents(container, apiKey);
 }
 
 /* ─── Event binding ───────────────────────────────────────── */
-function bindSettingsEvents(container, currentApiKey, intervals) {
+function bindSettingsEvents(container, currentApiKey) {
   const keyInput    = container.querySelector('#api-key-input');
   const toggleBtn   = container.querySelector('#toggle-key-vis');
   const validateBtn = container.querySelector('#validate-key-btn');
@@ -188,61 +171,11 @@ function bindSettingsEvents(container, currentApiKey, intervals) {
     clearKeyBtn.remove();
   });
 
-  // SRS: add interval
-  container.querySelector('#add-interval-btn')?.addEventListener('click', () => {
-    const listEl = container.querySelector('#srs-intervals-list');
-    const count  = listEl.querySelectorAll('.srs-interval-row').length;
-    const last   = parseInt(listEl.querySelector('.srs-interval-row:last-child .srs-interval-input')?.value || 30, 10);
-    const newRow = document.createElement('div');
-    newRow.className = 'srs-interval-row';
-    newRow.dataset.index = count;
-    newRow.innerHTML = `
-      <span class="srs-interval-label">المرحلة ${count + 1}</span>
-      <input type="number" class="srs-interval-input" min="1" max="365" value="${last * 2}">
-      <span class="srs-unit">يوم</span>
-      <button class="btn btn-danger btn-sm btn-icon-only remove-interval" data-index="${count}" title="حذف">✕</button>
-    `;
-    listEl.appendChild(newRow);
-    newRow.querySelector('.remove-interval')?.addEventListener('click', () => removeInterval(newRow));
-  });
-
-  // SRS: remove interval rows (existing)
-  container.querySelectorAll('.remove-interval').forEach(btn => {
-    btn.addEventListener('click', (e) => removeInterval(e.target.closest('.srs-interval-row')));
-  });
-
-  function removeInterval(row) {
-    const list = container.querySelector('#srs-intervals-list');
-    if (list.querySelectorAll('.srs-interval-row').length <= 1) {
-      showToast('يجب أن تكون هناك مرحلة واحدة على الأقل', 'warning');
-      return;
-    }
-    row.remove();
-    // Re-number labels
-    list.querySelectorAll('.srs-interval-row').forEach((r, i) => {
-      r.querySelector('.srs-interval-label').textContent = `المرحلة ${i + 1}`;
-    });
-  }
-
-  // SRS: save
-  container.querySelector('#save-intervals-btn')?.addEventListener('click', async () => {
-    const inputs = container.querySelectorAll('.srs-interval-input');
-    const vals   = Array.from(inputs).map(inp => parseInt(inp.value, 10) || 1);
-    try {
-      await saveIntervals(vals);
-      showToast('تم حفظ فترات المراجعة', 'success');
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
-  });
-
-  // SRS: reset
-  container.querySelector('#reset-intervals-btn')?.addEventListener('click', async () => {
-    const ok = await showConfirm('إعادة تعيين', 'إعادة فترات المراجعة للقيم الافتراضية؟');
-    if (!ok) return;
-    await saveIntervals(DEFAULT_INTERVALS);
-    container.querySelector('#srs-intervals-list').innerHTML = renderIntervalsUI(DEFAULT_INTERVALS);
-    showToast('تمت إعادة الفترات للافتراضي', 'success');
+  // Max daily reviews
+  container.querySelector('#save-max-daily-btn')?.addEventListener('click', async () => {
+    const val = container.querySelector('#max-daily-setting').value;
+    await setMaxDailyReviews(val);
+    showToast('تم حفظ الحد الأقصى للمراجعات اليومية', 'success');
   });
 
   // Theme buttons

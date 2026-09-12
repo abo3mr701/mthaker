@@ -3,9 +3,9 @@
  */
 
 import { subjects as subjectsDB, flashcards as cardsDB, files as filesDB, settings } from '../db.js';
-import { generateFlashcards, extractTextFromImage } from '../services/gemini.js';
+import { generateFlashcards, extractTextFromImage, generateWordInsight } from '../services/gemini.js';
 import { extractFileContent, needsVisionOCR, validateFile } from '../services/extractor.js';
-import { buildCard } from '../services/srs.js';
+import { buildCard, stageLabel } from '../services/srs.js';
 import { refreshSubjectCardCount } from './subjects.js';
 import {
   uid, showToast, showConfirm, debounce,
@@ -216,26 +216,12 @@ async function handleFiles(rawFiles, container, subject, existingFiles, existing
       if (textContent.trim().length > 30) {
         showAIStatus(container, `جاري إنشاء البطاقات التعليمية بالذكاء الاصطناعي…`);
         try {
-        // اسأل المستخدم خياراته أولاً
-const options = await askGenerationOptions();
-if (!options) continue; // لو ضغط إلغاء
-
-const rawCards = await generateFlashcards(
-  apiKey,
-  textContent,
-  subject.name,
-  options
-);
-          const newCards = rawCards.map(c => ({
-  ...buildCard({
-    front:     c.front,
-    back:      c.back || c.answer || '',
-    subjectId: subject.id,
-  }),
-  type:    c.type    || 'text',
-  options: c.options || undefined,
-  answer:  c.answer  || undefined,
-}));
+          const rawCards = await generateFlashcards(apiKey, textContent, subject.name);
+          const newCards = rawCards.map(c => buildCard({
+            front:     c.front,
+            back:      c.back,
+            subjectId: subject.id,
+          }));
           await cardsDB.bulkSave(newCards);
           await refreshSubjectCardCount(subject.id);
 
@@ -249,7 +235,6 @@ const rawCards = await generateFlashcards(
             bindCardsTab(container, subject, updatedCards);
           }
         } catch (aiErr) {
-          console.error('سبب الخطأ:', aiErr.message, aiErr);
           showToast(`تعذّر إنشاء البطاقات: ${aiErr.message}`, 'error', 7000);
         }
       } else {
@@ -309,19 +294,8 @@ function hideAIStatus(container) {
 function renderCardsTab(subject, cards) {
   cards.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-  const items = cards.map(c => `
-    <div class="flashcard-item" data-card-id="${c.id}">
-      <div class="flashcard-text" style="flex:1;">
-        <div class="front">${escHtml(c.front)}</div>
-        <div class="back">${escHtml(truncate(c.back, 120))}</div>
-        <span class="stage-badge">${stageText(c.stage)}</span>
-      </div>
-      <div class="flashcard-actions">
-        <button class="btn btn-sm btn-ghost" data-action="edit-card" data-id="${c.id}" title="تعديل">✏️</button>
-        <button class="btn btn-sm btn-danger" data-action="delete-card" data-id="${c.id}" title="حذف">🗑️</button>
-      </div>
-    </div>
-  `).join('');
+  const categories = Array.from(new Set(['عام', 'إنجليزي', ...cards.map(c => c.category || 'عام')]));
+  const catFilterOptions = categories.map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
 
   return `
     <div class="page-hd" style="margin-bottom:var(--s6);">
@@ -329,6 +303,10 @@ function renderCardsTab(subject, cards) {
         <span class="search-icon">🔍</span>
         <input type="text" class="form-input" id="card-search" placeholder="ابحث في البطاقات…" dir="rtl">
       </div>
+      <select class="form-select" id="card-category-filter" style="min-width:150px;">
+        <option value="">كل الأقسام</option>
+        ${catFilterOptions}
+      </select>
       <button class="btn btn-primary btn-sm" id="btn-add-card">➕ بطاقة يدوية</button>
     </div>
 
@@ -337,40 +315,58 @@ function renderCardsTab(subject, cards) {
         ? `<div class="empty-state"><div class="empty-icon">🃏</div>
            <h3 class="empty-title">لا توجد بطاقات بعد</h3>
            <p class="empty-sub">ارفع ملفاً لإنشاء بطاقات تلقائياً أو أضف بطاقة يدوياً</p></div>`
-        : items
+        : cards.map(cardItemHtml).join('')
       }
     </div>
   `;
 }
 
+function cardItemHtml(c) {
+  const category = c.category || 'عام';
+  const isEnglish = category === 'إنجليزي';
+  return `
+    <div class="flashcard-item" data-card-id="${c.id}">
+      <div class="flashcard-text" style="flex:1;">
+        <div class="front">
+          ${escHtml(c.front)}
+          ${isEnglish ? `<button class="tts-btn-inline" data-action="tts" data-text="${escHtml(c.front)}" title="نطق">🔊</button>` : ''}
+        </div>
+        <div class="back">${escHtml(truncate(c.translation || c.back, 120))}</div>
+        ${isEnglish && c.example ? `<div class="text-muted text-xs" style="margin-top:var(--s2);">📝 ${escHtml(truncate(c.example, 100))}</div>` : ''}
+        <span class="stage-badge">${stageLabel(c)}</span>
+        <span class="category-badge ${isEnglish ? 'category-badge-en' : ''}">${escHtml(category)}</span>
+        ${c.lapses ? `<span class="lapses-badge" title="عدد الأخطاء">✗ ${c.lapses}</span>` : ''}
+      </div>
+      <div class="flashcard-actions">
+        <button class="btn btn-sm btn-ghost" data-action="edit-card" data-id="${c.id}" title="تعديل">✏️</button>
+        <button class="btn btn-sm btn-danger" data-action="delete-card" data-id="${c.id}" title="حذف">🗑️</button>
+      </div>
+    </div>
+  `;
+}
+
 function bindCardsTab(container, subject, cards) {
-  // Search
-  container.querySelector('#card-search')?.addEventListener('input', debounce((e) => {
-    const q = e.target.value.trim().toLowerCase();
-    const filtered = q
-      ? cards.filter(c =>
-          c.front.toLowerCase().includes(q) || c.back.toLowerCase().includes(q)
-        )
-      : cards;
+  const applyFilters = debounce(() => {
+    const q   = (container.querySelector('#card-search')?.value || '').trim().toLowerCase();
+    const cat = container.querySelector('#card-category-filter')?.value || '';
+
+    const filtered = cards.filter(c => {
+      const matchesQ = !q || c.front.toLowerCase().includes(q) || c.back.toLowerCase().includes(q);
+      const matchesCat = !cat || (c.category || 'عام') === cat;
+      return matchesQ && matchesCat;
+    });
 
     const list = container.querySelector('#cards-list');
     if (!list) return;
     list.innerHTML = filtered.length === 0
       ? `<p class="text-muted text-sm" style="padding:var(--s7) 0;">لا توجد نتائج</p>`
-      : filtered.map(c => `
-        <div class="flashcard-item" data-card-id="${c.id}">
-          <div class="flashcard-text" style="flex:1;">
-            <div class="front">${escHtml(c.front)}</div>
-            <div class="back">${escHtml(truncate(c.back, 120))}</div>
-            <span class="stage-badge">${stageText(c.stage)}</span>
-          </div>
-          <div class="flashcard-actions">
-            <button class="btn btn-sm btn-ghost" data-action="edit-card" data-id="${c.id}">✏️</button>
-            <button class="btn btn-sm btn-danger" data-action="delete-card" data-id="${c.id}">🗑️</button>
-          </div>
-        </div>`).join('');
+      : filtered.map(cardItemHtml).join('');
     rebindCardActions(container, subject, cards);
-  }, 250));
+  }, 200);
+
+  // Search + category filter
+  container.querySelector('#card-search')?.addEventListener('input', applyFilters);
+  container.querySelector('#card-category-filter')?.addEventListener('change', applyFilters);
 
   // Add card button
   container.querySelector('#btn-add-card')?.addEventListener('click', () => {
@@ -381,6 +377,21 @@ function bindCardsTab(container, subject, cards) {
 }
 
 function rebindCardActions(container, subject, cards) {
+  // Pronounce (English deck)
+  container.querySelectorAll('[data-action="tts"]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const text = btn.dataset.text;
+      if (!('speechSynthesis' in window) || !text) return;
+      try {
+        window.speechSynthesis.cancel();
+        const utter = new SpeechSynthesisUtterance(text);
+        utter.lang = 'en-US';
+        window.speechSynthesis.speak(utter);
+      } catch { /* unsupported */ }
+    });
+  });
+
   // Edit
   container.querySelectorAll('[data-action="edit-card"]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -416,19 +427,46 @@ function openCardModal(container, subject, existing, cards) {
   titleEl.textContent = isEdit ? 'تعديل البطاقة' : 'بطاقة جديدة';
   backdrop.classList.remove('hidden');
 
+  const currentCategory = existing?.category || 'عام';
+
   bodyEl.innerHTML = `
     <div class="form-group">
-      <label class="form-label">الوجه (السؤال) *</label>
-      <textarea class="form-textarea" id="card-front" rows="3" dir="rtl"
+      <label class="form-label">التصنيف / القسم (Category)</label>
+      <select class="form-select" id="card-category">
+        <option value="عام" ${currentCategory === 'عام' ? 'selected' : ''}>عام</option>
+        <option value="إنجليزي" ${currentCategory === 'إنجليزي' ? 'selected' : ''}>إنجليزي</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label" id="card-front-label">الوجه (السؤال) *</label>
+      <textarea class="form-textarea" id="card-front" rows="2" dir="auto"
         placeholder="أدخل السؤال أو المفهوم…">${escHtml(existing?.front || '')}</textarea>
       <span class="form-error" id="front-error">يرجى إدخال وجه البطاقة.</span>
     </div>
-    <div class="form-group">
-      <label class="form-label">الظهر (الإجابة) *</label>
-      <textarea class="form-textarea" id="card-back" rows="4" dir="rtl"
+
+    <div id="english-fields" class="${currentCategory === 'إنجليزي' ? '' : 'hidden'}">
+      <div style="margin-bottom:var(--s5);">
+        <button type="button" class="btn btn-secondary btn-sm" id="ai-word-btn">
+          ✨ توليد ترجمة ومثال بالذكاء الاصطناعي
+        </button>
+      </div>
+      <div class="form-group">
+        <label class="form-label">الترجمة</label>
+        <input type="text" class="form-input" id="card-translation" dir="auto" value="${escHtml(existing?.translation || '')}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">مثال عملي (إنجليزي)</label>
+        <textarea class="form-textarea" id="card-example" rows="2" dir="ltr">${escHtml(existing?.example || '')}</textarea>
+      </div>
+    </div>
+
+    <div class="form-group" id="back-field-group">
+      <label class="form-label" id="card-back-label">الظهر (الإجابة) *</label>
+      <textarea class="form-textarea" id="card-back" rows="3" dir="auto"
         placeholder="أدخل الإجابة أو الشرح…">${escHtml(existing?.back || '')}</textarea>
       <span class="form-error" id="back-error">يرجى إدخال ظهر البطاقة.</span>
     </div>
+
     <div style="display:flex;gap:var(--s4);justify-content:flex-end;">
       <button class="btn btn-ghost" id="cancel-card-btn">إلغاء</button>
       <button class="btn btn-primary" id="save-card-btn">
@@ -447,20 +485,71 @@ function openCardModal(container, subject, existing, cards) {
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); }, { once: true });
   bodyEl.querySelector('#cancel-card-btn').addEventListener('click', close);
 
+  // Toggle English-only fields + labels when category changes
+  const categorySelect = bodyEl.querySelector('#card-category');
+  const englishFields   = bodyEl.querySelector('#english-fields');
+  const backGroup       = bodyEl.querySelector('#back-field-group');
+  const frontLabel      = bodyEl.querySelector('#card-front-label');
+  const backLabel       = bodyEl.querySelector('#card-back-label');
+
+  function syncCategoryUI() {
+    const isEn = categorySelect.value === 'إنجليزي';
+    englishFields.classList.toggle('hidden', !isEn);
+    frontLabel.textContent = isEn ? 'الكلمة / العبارة الإنجليزية *' : 'الوجه (السؤال) *';
+    backLabel.textContent  = isEn ? 'الظهر (اختياري إن استخدمت حقول الترجمة أعلاه)' : 'الظهر (الإجابة) *';
+    backGroup.querySelector('#back-error').textContent = isEn
+      ? 'يرجى إدخال الظهر أو تعبئة الترجمة أعلاه.'
+      : 'يرجى إدخال ظهر البطاقة.';
+  }
+  categorySelect.addEventListener('change', syncCategoryUI);
+  syncCategoryUI();
+
+  // AI: translation + example generation for English words
+  bodyEl.querySelector('#ai-word-btn')?.addEventListener('click', async () => {
+    const word = bodyEl.querySelector('#card-front').value.trim();
+    if (!word) { showToast('اكتب الكلمة الإنجليزية أولاً', 'warning'); return; }
+    const apiKey = await settings.get('geminiApiKey');
+    if (!apiKey) { showToast('أدخل مفتاح Gemini API في الإعدادات أولاً', 'warning', 5000); return; }
+
+    const btn = bodyEl.querySelector('#ai-word-btn');
+    btn.disabled = true; const original = btn.textContent; btn.textContent = '⏳ جاري التوليد…';
+    try {
+      const insight = await generateWordInsight(apiKey, word);
+      bodyEl.querySelector('#card-translation').value = insight.translation;
+      bodyEl.querySelector('#card-example').value = insight.example;
+      showToast('تم توليد الترجمة والمثال بنجاح', 'success');
+    } catch (err) {
+      showToast(err.message, 'error', 6000);
+    } finally {
+      btn.disabled = false; btn.textContent = original;
+    }
+  });
+
   bodyEl.querySelector('#save-card-btn').addEventListener('click', async () => {
+    const category = categorySelect.value;
+    const isEnglish = category === 'إنجليزي';
     const front = bodyEl.querySelector('#card-front').value.trim();
-    const back  = bodyEl.querySelector('#card-back').value.trim();
+    let   back  = bodyEl.querySelector('#card-back').value.trim();
+    const translation = isEnglish ? bodyEl.querySelector('#card-translation').value.trim() : '';
+    const example      = isEnglish ? bodyEl.querySelector('#card-example').value.trim() : '';
     const fe    = bodyEl.querySelector('#front-error');
     const be    = bodyEl.querySelector('#back-error');
     let valid   = true;
 
     if (!front) { fe.classList.add('visible'); valid = false; } else fe.classList.remove('visible');
-    if (!back)  { be.classList.add('visible'); valid = false; } else be.classList.remove('visible');
+
+    // For English cards, either the "back" field OR the translation must be filled
+    if (isEnglish) {
+      if (!back && !translation) { be.classList.add('visible'); valid = false; } else be.classList.remove('visible');
+      if (!back) back = translation; // keep list views / old code paths working
+    } else {
+      if (!back) { be.classList.add('visible'); valid = false; } else be.classList.remove('visible');
+    }
     if (!valid) return;
 
     const card = isEdit
-      ? { ...existing, front, back }
-      : buildCard({ front, back, subjectId: subject.id });
+      ? { ...existing, front, back, category, translation, example }
+      : buildCard({ front, back, subjectId: subject.id, category, translation, example });
 
     await cardsDB.save(card);
     await refreshSubjectCardCount(subject.id);
@@ -479,79 +568,5 @@ function openCardModal(container, subject, existing, cards) {
       bindCardsTab(container, subject, cards);
     }
     showToast(isEdit ? 'تم تعديل البطاقة' : 'تم إضافة البطاقة', 'success');
-  });
-}
-
-function stageText(stage) {
-  const labels = ['جديدة', 'المرحلة 1', 'المرحلة 2', 'المرحلة 3', 'المرحلة 4', 'متقنة'];
-  return labels[Math.min(stage, labels.length - 1)];
-}
-
-
-function askGenerationOptions() {
-  return new Promise((resolve) => {
-    const backdrop = document.getElementById('modal-form');
-    const titleEl  = document.getElementById('modal-form-title');
-    const bodyEl   = document.getElementById('modal-form-body');
-    const closeBtn = document.getElementById('modal-form-close');
-
-    titleEl.textContent = '⚙️ خيارات إنشاء البطاقات';
-    backdrop.classList.remove('hidden');
-
-    bodyEl.innerHTML = `
-      <div class="form-group">
-        <label class="form-label">عدد البطاقات (الحد الأقصى)</label>
-        <input type="number" class="form-input" id="gen-count"
-          value="15" min="3" max="50">
-      </div>
-      <div class="form-group">
-        <label class="form-label">أنواع البطاقات</label>
-        <div class="gen-type-grid">
-          <div class="gen-type-card selected" data-type="text">
-            <div class="gen-type-icon">✍️</div>
-            <div class="gen-type-label">نص</div>
-          </div>
-          <div class="gen-type-card" data-type="mcq">
-            <div class="gen-type-icon">🔘</div>
-            <div class="gen-type-label">اختيار متعدد</div>
-          </div>
-          <div class="gen-type-card" data-type="tf">
-            <div class="gen-type-icon">✅</div>
-            <div class="gen-type-label">صح / خطأ</div>
-          </div>
-        </div>
-      </div>
-      <div style="display:flex;gap:var(--s4);justify-content:flex-end;margin-top:var(--s6);">
-        <button class="btn btn-ghost" id="gen-cancel">إلغاء</button>
-        <button class="btn btn-primary" id="gen-confirm">🚀 إنشاء البطاقات</button>
-      </div>
-    `;
-
-    const selected = new Set(['text']);
-
-    bodyEl.querySelectorAll('.gen-type-card').forEach(card => {
-      card.addEventListener('click', () => {
-        const type = card.dataset.type;
-        if (selected.has(type) && selected.size > 1) {
-          selected.delete(type);
-          card.classList.remove('selected');
-        } else {
-          selected.add(type);
-          card.classList.add('selected');
-        }
-      });
-    });
-
-    const close = (result) => {
-      backdrop.classList.add('hidden');
-      resolve(result);
-    };
-
-    closeBtn.addEventListener('click', () => close(null), { once: true });
-    bodyEl.querySelector('#gen-cancel').addEventListener('click', () => close(null));
-    bodyEl.querySelector('#gen-confirm').addEventListener('click', () => {
-      const maxCards = parseInt(bodyEl.querySelector('#gen-count').value, 10) || 15;
-      close({ maxCards, types: [...selected] });
-    });
   });
 }

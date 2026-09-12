@@ -1,27 +1,23 @@
 /**
- * dashboard.js — Dashboard with streak, stats, activity feed
+ * dashboard.js — Dashboard view
  */
 
-import { getDashboardStats, history as historyDB, flashcards as cardsDB, streak as streakDB } from '../db.js';
-import { timeAgo } from '../utils/helpers.js';
+import { getDashboardStats, history as historyDB, flashcards as cardsDB } from '../db.js';
+import { formatDate, timeAgo, arabicCount } from '../utils/helpers.js';
 
 export async function renderDashboard(container) {
   container.innerHTML = `<div class="flex-center" style="padding:var(--s10)"><div class="spinner"></div></div>`;
 
-  // Record today as a study day for streak
-  await streakDB.recordToday().catch(()=>{});
-
   let stats, recent;
   try {
-    [stats, recent] = await Promise.all([getDashboardStats(), historyDB.getRecent(10)]);
+    [stats, recent] = await Promise.all([
+      getDashboardStats(),
+      historyDB.getRecent(10),
+    ]);
   } catch (err) {
-    container.innerHTML = `<div class="empty-state"><p class="text-danger">خطأ: ${err.message}</p></div>`;
+    container.innerHTML = `<div class="empty-state"><p class="text-danger">خطأ في تحميل البيانات: ${err.message}</p></div>`;
     return;
   }
-
-  // Update sidebar streak badge
-  const streakEl = document.getElementById('streak-count');
-  if (streakEl) streakEl.textContent = stats.streak;
 
   const today    = new Date().toLocaleDateString('ar-SA', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
   const greeting = getGreeting();
@@ -37,78 +33,147 @@ export async function renderDashboard(container) {
           <div>بطاقة للمراجعة اليوم</div>
         </div>
         <div class="welcome-meta-item">
-          <div class="welcome-meta-val">🔥 ${stats.streak}</div>
-          <div>يوم متواصل</div>
+          <div class="welcome-meta-val">${stats.pomodoroStats.todayCount}</div>
+          <div>جلسة بومودورو اليوم</div>
         </div>
         <div class="welcome-meta-item">
           <div class="welcome-meta-val">${stats.pomodoroStats.totalHours}</div>
-          <div>ساعة دراسة</div>
+          <div>ساعة إجمالية</div>
         </div>
       </div>
     </div>
 
-    <!-- Stat cards -->
+    <!-- Stats grid -->
     <div class="stat-grid">
       <div class="stat-card">
         <div class="stat-icon stat-icon-purple">📚</div>
-        <div><div class="stat-val">${stats.subjectCount}</div><div class="stat-lbl">مادة دراسية</div></div>
+        <div>
+          <div class="stat-val">${stats.subjectCount}</div>
+          <div class="stat-lbl">مادة دراسية</div>
+        </div>
       </div>
       <div class="stat-card">
         <div class="stat-icon stat-icon-gold">🃏</div>
-        <div><div class="stat-val">${stats.cardCount}</div><div class="stat-lbl">بطاقة تعليمية</div></div>
+        <div>
+          <div class="stat-val">${stats.cardCount}</div>
+          <div class="stat-lbl">بطاقة تعليمية</div>
+        </div>
       </div>
-      <div class="stat-card" style="cursor:pointer;" onclick="window.location.hash='#study'">
+      <div class="stat-card" id="dash-due-card" style="cursor:pointer">
         <div class="stat-icon stat-icon-green">📅</div>
-        <div><div class="stat-val" style="${stats.dueCount>0?'color:var(--danger)':''}">${stats.dueCount}</div><div class="stat-lbl">مستحقة اليوم</div></div>
+        <div>
+          <div class="stat-val">${stats.dueCount}</div>
+          <div class="stat-lbl">بطاقة مستحقة اليوم</div>
+        </div>
       </div>
-      <div class="stat-card">
-        <div class="stat-icon stat-icon-blue">🔥</div>
-        <div><div class="stat-val" style="color:var(--gold)">${stats.streak}</div><div class="stat-lbl">يوم streak</div></div>
+      <div class="stat-card" id="dash-plans-card" style="cursor:pointer">
+        <div class="stat-icon stat-icon-blue">🗓️</div>
+        <div>
+          <div class="stat-val">${stats.planCount}</div>
+          <div class="stat-lbl">خطة مراجعة دروس${stats.plansDueToday ? ` (${stats.plansDueToday} اليوم)` : ''}</div>
+        </div>
+      </div>
+      <div class="stat-card" id="dash-english-card" style="cursor:pointer">
+        <div class="stat-icon" style="background:var(--info-soft);">🇬🇧</div>
+        <div>
+          <div class="stat-val">${stats.englishCount}</div>
+          <div class="stat-lbl">كلمة إنجليزية</div>
+        </div>
       </div>
     </div>
 
-    <!-- Two-column -->
+    <!-- Two-column layout: recent activity + quick actions -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--s7);" class="dash-grid">
+
+      <!-- Quick actions -->
       <div class="card">
         <h3 style="font-size:1rem;font-weight:700;margin-bottom:var(--s6);">⚡ إجراءات سريعة</h3>
         <div style="display:flex;flex-direction:column;gap:var(--s4);">
-          <a href="#study"     class="btn btn-primary w-full">🎯 مراجعة اليوم ${stats.dueCount>0?`(${stats.dueCount})`:''}</a>
-          <a href="#quiz"      class="btn btn-secondary w-full">📝 اختبار مدمج</a>
-          <a href="#flashcards" class="btn btn-secondary w-full">🃏 البطاقات التعليمية</a>
-          <a href="#pomodoro"  class="btn btn-secondary w-full">⏱️ مؤقت بومودورو</a>
-          <a href="#draw"      class="btn btn-secondary w-full">🎨 لوحة الرسم</a>
+          <button class="btn btn-primary w-full" id="dash-start-review">
+            🎯 ابدأ المراجعة ${stats.dueCount > 0 ? `(${stats.dueCount})` : ''}
+          </button>
+          <button class="btn btn-secondary w-full" id="dash-new-subject">
+            ➕ مادة جديدة
+          </button>
+          <button class="btn btn-secondary w-full" id="dash-goto-pomodoro">
+            ⏱️ مؤقت بومودورو
+          </button>
+          <button class="btn btn-secondary w-full" id="dash-goto-reviews">
+            🗓️ خطط مراجعة الدروس
+          </button>
+          <button class="btn btn-secondary w-full" id="dash-goto-english">
+            🇬🇧 مراجعة الإنجليزية
+          </button>
         </div>
       </div>
+
+      <!-- Recent activity -->
       <div class="card">
         <h3 style="font-size:1rem;font-weight:700;margin-bottom:var(--s6);">📈 آخر المراجعات</h3>
-        ${await buildActivity(recent)}
+        ${await renderRecentActivity(recent)}
       </div>
     </div>
   `;
 
-  // Responsive grid
-  if (window.innerWidth < 680) {
-    const grid = container.querySelector('.dash-grid');
-    if (grid) grid.style.gridTemplateColumns = '1fr';
+  // Wire up quick-action buttons
+  container.querySelector('#dash-start-review')?.addEventListener('click', () => {
+    window.location.hash = '#study';
+  });
+  container.querySelector('#dash-new-subject')?.addEventListener('click', () => {
+    window.location.hash = '#subjects';
+    // Signal subjects view to open new-subject modal
+    setTimeout(() => document.dispatchEvent(new CustomEvent('open-new-subject')), 100);
+  });
+  container.querySelector('#dash-goto-pomodoro')?.addEventListener('click', () => {
+    window.location.hash = '#pomodoro';
+  });
+  container.querySelector('#dash-due-card')?.addEventListener('click', () => {
+    window.location.hash = '#study';
+  });
+  container.querySelector('#dash-plans-card')?.addEventListener('click', () => {
+    window.location.hash = '#reviews';
+  });
+  container.querySelector('#dash-goto-reviews')?.addEventListener('click', () => {
+    window.location.hash = '#reviews';
+  });
+  container.querySelector('#dash-english-card')?.addEventListener('click', () => {
+    window.location.hash = '#study/_/' + encodeURIComponent('إنجليزي');
+  });
+  container.querySelector('#dash-goto-english')?.addEventListener('click', () => {
+    window.location.hash = '#study/_/' + encodeURIComponent('إنجليزي');
+  });
+
+  // Responsive: stack on mobile
+  const grid = container.querySelector('.dash-grid');
+  if (window.innerWidth < 680 && grid) {
+    grid.style.gridTemplateColumns = '1fr';
   }
 }
 
-async function buildActivity(recent) {
-  if (!recent?.length) {
+async function renderRecentActivity(recent) {
+  if (!recent || recent.length === 0) {
     return `<p class="text-muted text-sm text-center" style="padding:var(--s7) 0;">لا توجد مراجعات بعد</p>`;
   }
-  const items = await Promise.all(recent.map(async h => {
-    const card = await cardsDB.getById(h.cardId);
-    return { ...h, cardFront: card?.front || '(محذوفة)' };
-  }));
-  return `<div class="activity-list">
-    ${items.map(h => `
-      <div class="activity-item">
-        <div class="activity-dot" style="background:${h.correct?'var(--success)':'var(--danger)'}"></div>
-        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${h.cardFront}</span>
-        <span class="activity-time">${timeAgo(h.reviewedAt)}</span>
-      </div>`).join('')}
-  </div>`;
+
+  // Enrich with card fronts
+  const items = await Promise.all(
+    recent.map(async (h) => {
+      const card = await cardsDB.getById(h.cardId);
+      return { ...h, cardFront: card?.front || '(بطاقة محذوفة)' };
+    })
+  );
+
+  return `
+    <div class="activity-list">
+      ${items.map(h => `
+        <div class="activity-item">
+          <div class="activity-dot" style="background:${h.correct ? 'var(--success)' : 'var(--danger)'}"></div>
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${h.cardFront}</span>
+          <span class="activity-time">${timeAgo(h.reviewedAt)}</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
 }
 
 function getGreeting() {
