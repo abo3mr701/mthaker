@@ -6,15 +6,20 @@
   <meta name="description" content="مذاكر - تطبيق البطاقات التعليمية الذكي بالذكاء الاصطناعي">
   <meta name="theme-color" content="#7C3AED">
   <title>مذاكر</title>
+
+  <!-- Arabic Font: Tajawal -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800;900&display=swap" rel="stylesheet">
+
+  <!-- PDF.js (text extraction from PDFs) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
   <link rel="stylesheet" href="css/main.css">
 </head>
 <body data-theme="light">
 
-  <!-- Loading Screen -->
+  <!-- ── Loading Screen ────────────────────────────────── -->
   <div id="loading-screen" class="loading-screen">
     <div class="loader-inner">
       <div class="loader-glyph">م</div>
@@ -24,10 +29,10 @@
     </div>
   </div>
 
-  <!-- App Shell -->
+  <!-- ── App Shell ─────────────────────────────────────── -->
   <div id="app" class="app hidden">
 
-    <!-- Sidebar -->
+    <!-- Sidebar Navigation -->
     <nav id="sidebar" class="sidebar" role="navigation" aria-label="القائمة الرئيسية">
       <div class="sidebar-top">
         <div class="brand">
@@ -37,57 +42,34 @@
         <button class="icon-btn sidebar-close" id="sidebar-close" aria-label="إغلاق القائمة">✕</button>
       </div>
 
-      <!-- Streak badge -->
-      <div class="streak-bar" id="sidebar-streak">
-        <span class="streak-fire">🔥</span>
-        <span class="streak-count" id="streak-count">0</span>
-        <span class="streak-label">يوم متواصل</span>
-      </div>
-
       <ul class="nav-list" role="list">
         <li><a href="#dashboard" class="nav-link" data-view="dashboard">
-          <span class="nav-icon">📊</span><span>لوحة التحكم</span>
+          <span class="nav-icon">&#x1F4CA;</span><span>لوحة التحكم</span>
         </a></li>
         <li><a href="#subjects" class="nav-link" data-view="subjects">
-          <span class="nav-icon">📚</span><span>المواد الدراسية</span>
+          <span class="nav-icon">&#x1F4DA;</span><span>المواد الدراسية</span>
         </a></li>
-
-        <li class="nav-section-label">التعلم</li>
-
         <li><a href="#study" class="nav-link" data-view="study">
-          <span class="nav-icon">🎯</span><span>مراجعة اليوم</span>
-          <span class="nav-badge" id="nav-due-badge" style="display:none"></span>
+          <span class="nav-icon">&#x1F3AF;</span><span>بطاقات المراجعة</span>
         </a></li>
-        <li><a href="#schedule" class="nav-link" data-view="schedule">
-          <span class="nav-icon">📅</span><span>جدولة المراجعات</span>
-        </a></li>
-        <li><a href="#flashcards" class="nav-link" data-view="flashcards">
-          <span class="nav-icon">🃏</span><span>البطاقات التعليمية</span>
-        </a></li>
-        <li><a href="#quiz" class="nav-link" data-view="quiz">
-          <span class="nav-icon">📝</span><span>الاختبار المدمج</span>
-        </a></li>
-
-        <li class="nav-section-label">أدوات</li>
-
-        <li><a href="#draw" class="nav-link" data-view="draw">
-          <span class="nav-icon">🎨</span><span>لوحة الرسم</span>
+        <li><a href="#reviews" class="nav-link" data-view="reviews">
+          <span class="nav-icon">&#x1F5D3;</span><span>المراجعات</span>
         </a></li>
         <li><a href="#pomodoro" class="nav-link" data-view="pomodoro">
-          <span class="nav-icon">⏱️</span><span>مؤقت بومودورو</span>
+          <span class="nav-icon">&#x23F1;</span><span>مؤقت بومودورو</span>
         </a></li>
         <li><a href="#chat" class="nav-link" data-view="chat">
-          <span class="nav-icon">🤖</span><span>المساعد الذكي</span>
+          <span class="nav-icon">&#x1F916;</span><span>المساعد الذكي</span>
         </a></li>
       </ul>
 
       <div class="sidebar-foot">
         <a href="#settings" class="nav-link" data-view="settings">
-          <span class="nav-icon">⚙️</span><span>الإعدادات</span>
+          <span class="nav-icon">&#x2699;</span><span>الإعدادات</span>
         </a>
-        <button class="theme-btn" id="theme-toggle" aria-label="تبديل المظهر">
-          <span class="theme-icon-light">☀️</span>
-          <span class="theme-icon-dark">🌙</span>
+        <button class="theme-btn" id="theme-toggle" aria-label="تبديل المظهر" title="تبديل المظهر">
+          <span class="theme-icon-light">&#x2600;</span>
+          <span class="theme-icon-dark">&#x1F319;</span>
         </button>
       </div>
     </nav>
@@ -95,8 +77,10 @@
     <!-- Mobile overlay -->
     <div id="overlay" class="overlay" role="presentation"></div>
 
-    <!-- Main area -->
+    <!-- Main content area -->
     <main id="main" class="main-area" role="main">
+
+      <!-- Mobile header -->
       <header class="topbar" role="banner">
         <button class="icon-btn menu-btn" id="menu-btn" aria-label="فتح القائمة">
           <svg width="22" height="16" viewBox="0 0 22 16" fill="none">
@@ -107,19 +91,21 @@
         </button>
         <h1 class="topbar-title" id="page-title">لوحة التحكم</h1>
         <button class="theme-btn topbar-theme" id="theme-toggle-mob" aria-label="تبديل المظهر">
-          <span class="theme-icon-light">☀️</span>
-          <span class="theme-icon-dark">🌙</span>
+          <span class="theme-icon-light">&#x2600;</span>
+          <span class="theme-icon-dark">&#x1F319;</span>
         </button>
       </header>
 
+      <!-- View container — all pages render here -->
       <div id="view" class="view-container" role="region" aria-live="polite"></div>
+
     </main>
   </div>
 
-  <!-- Toasts -->
+  <!-- ── Toast Notifications ────────────────────────────── -->
   <div id="toasts" class="toast-stack" aria-live="assertive" aria-atomic="false"></div>
 
-  <!-- Confirm Dialog -->
+  <!-- ── Confirm Dialog ─────────────────────────────────── -->
   <div id="modal-confirm" class="modal-backdrop hidden" role="dialog" aria-modal="true">
     <div class="modal-box modal-sm">
       <h3 class="modal-title" id="confirm-title">تأكيد</h3>
@@ -131,7 +117,7 @@
     </div>
   </div>
 
-  <!-- Generic Modal -->
+  <!-- ── Generic Form / Info Modal ─────────────────────── -->
   <div id="modal-form" class="modal-backdrop hidden" role="dialog" aria-modal="true">
     <div class="modal-box modal-md" id="modal-form-box">
       <div class="modal-head">
@@ -142,6 +128,7 @@
     </div>
   </div>
 
+  <!-- ── App entry point ───────────────────────────────── -->
   <script type="module" src="js/app.js"></script>
 </body>
 </html>
