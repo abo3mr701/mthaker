@@ -9,7 +9,7 @@
  */
 
 const GEMINI_BASE  = 'https://generativelanguage.googleapis.com/v1beta';
-const FLASH_MODEL  = 'gemini-1.5-flash';
+const FLASH_MODEL  = 'gemini-2.5-flash';
 const TEXT_ENDPOINT = (key) =>
   `${GEMINI_BASE}/models/${FLASH_MODEL}:generateContent?key=${key}`;
 
