@@ -1362,15 +1362,26 @@ ul,ol { list-style:none; }
   --eng-gold-border: rgba(230,168,43,.3);
 
   background: var(--eng-bg);
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(255,255,255,.035) 1px, transparent 0);
+  background-size: 22px 22px;
   color: var(--eng-ink1);
-  border-radius: var(--r5);
-  padding: var(--s7);
-  margin: calc(var(--s7) * -1);
-  min-height: calc(100vh - 160px);
+  min-height: 100dvh;
+  padding: var(--s7) clamp(var(--s7), 4vw, 64px);
 }
-@media (max-width: 760px) {
-  .eng-page { margin: calc(var(--s5) * -1); border-radius: 0; padding: var(--s5); }
+
+/* Break out of the app's centered 1200px container + checkered pattern
+ * entirely, so this feels like a distinct full-bleed "app within the app". */
+.view-container:has(.eng-page) {
+  max-width: none;
+  padding: 0;
+  margin: 0;
+  animation: none;
 }
+
+/* ── Fullscreen mode: hide مذاكر's sidebar entirely ─────────── */
+#app.app-fullscreen .sidebar { display: none; }
+#app.app-fullscreen .topbar  { display: none; }
 
 .eng-serif { font-family: 'Fraunces', 'Noto Naskh Arabic', serif; }
 
@@ -1389,6 +1400,23 @@ ul,ol { list-style:none; }
   border-radius: var(--r-full); padding: var(--s2) var(--s5);
   color: var(--eng-ink2); font-size: .85rem;
 }
+.eng-header-actions { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+.eng-fullscreen-btn {
+  display: flex; align-items: center; gap: var(--s2);
+  background: var(--eng-surface); border: 1px solid var(--eng-border);
+  color: var(--eng-ink2); padding: var(--s2) var(--s5);
+  border-radius: var(--r-full); font-size: .82rem; cursor: pointer;
+  font-family: var(--font); transition: all var(--ease);
+}
+.eng-fullscreen-btn:hover { border-color: var(--eng-gold-border); color: var(--eng-gold); }
+
+.eng-level-breakdown { display: flex; gap: var(--s3); flex-wrap: wrap; margin-bottom: var(--s7); }
+.eng-level-chip {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s3) var(--s5); border-radius: var(--r3); border: 1px solid;
+  font-size: .8rem; font-weight: 700;
+}
+.eng-level-chip b { font-family: 'Fraunces', serif; font-size: 1.05rem; }
 
 .eng-tabs {
   display: inline-flex; gap: var(--s1);
