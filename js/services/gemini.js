@@ -183,6 +183,74 @@ export async function generateWordInsight(apiKey, word) {
   };
 }
 
+/* ─── English section: full Oxford-shaped entry for a custom word ──
+ * Used when the user adds their own English word in the dedicated
+ * "الإنجليزية" section — generates the same shape as the built-in
+ * Oxford dataset (level, Arabic translation, definition, 3 examples)
+ * so custom words behave identically to the curated ones.
+ * ──────────────────────────────────────────────────────────── */
+export async function generateEnglishWordEntry(apiKey, word) {
+  const clean = (word || '').trim();
+  if (!clean) throw new Error('أدخل الكلمة الإنجليزية أولاً.');
+
+  const prompt = `
+أنت مساعد متخصص في قواميس اللغة الإنجليزية. لدي الكلمة/العبارة الإنجليزية: "${clean}"
+
+أعطني بصيغة JSON فقط (بدون أي نص إضافي أو Markdown):
+{
+  "pos": "نوع الكلمة اختصاراً بالإنجليزي (مثل n. أو v. أو adj.)",
+  "level": "أحد المستويات التالية بالضبط: A1 أو A2 أو B1 أو B2",
+  "ar": "الترجمة العربية الدقيقة والمختصرة",
+  "definition": "تعريف بسيط بالإنجليزية",
+  "examples": {
+    "daily": "جملة مثال من الحياة اليومية بالإنجليزية",
+    "academic": "جملة مثال أكاديمية/مهنية بالإنجليزية",
+    "idiom": "جملة مثال اصطلاحية أو ثقافية بالإنجليزية"
+  }
+}
+`.trim();
+
+  const raw = await callGemini(apiKey, [{ role: 'user', parts: [{ text: prompt }] }], { temperature: 0.3 });
+  const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+
+  let data;
+  try {
+    data = JSON.parse(cleaned);
+  } catch {
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('تعذّر تحليل استجابة الذكاء الاصطناعي. حاول مرة أخرى.');
+    data = JSON.parse(match[0]);
+  }
+
+  const validLevels = ['A1', 'A2', 'B1', 'B2'];
+  return {
+    pos:        (data.pos || '').trim(),
+    level:      validLevels.includes(data.level) ? data.level : 'A1',
+    ar:         (data.ar || '').trim(),
+    definition: (data.definition || '').trim(),
+    examples: {
+      daily:    data.examples?.daily || '',
+      academic: data.examples?.academic || '',
+      idiom:    data.examples?.idiom || '',
+    },
+  };
+}
+
+/* ─── English section: ask the AI tutor a free-form question about a word ── */
+export async function askAboutWord(apiKey, word, question) {
+  const q = (question || '').trim();
+  if (!q) throw new Error('اكتب سؤالك أولاً.');
+
+  const context = `الكلمة الإنجليزية: "${word.word}" (${word.pos || ''}, مستوى ${word.level || ''})
+الترجمة: ${word.ar || '—'}
+التعريف: ${word.definition || '—'}
+أمثلة: ${[word.examples?.daily, word.examples?.academic, word.examples?.idiom].filter(Boolean).join(' | ') || '—'}`;
+
+  const prompt = `أنت مدرّس لغة إنجليزية ودود يشرح بالعربية. إليك سياق الكلمة:\n${context}\n\nسؤال الطالب: ${q}\n\nأجب بإيجاز ووضوح بالعربية (مع أمثلة إنجليزية عند الحاجة).`;
+
+  return callGemini(apiKey, [{ role: 'user', parts: [{ text: prompt }] }], { temperature: 0.5 });
+}
+
 /* ─── OCR: extract text from a base64 image ──────────────── */
 export async function extractTextFromImage(apiKey, base64Data, mimeType = 'image/jpeg') {
   const contents = [{
