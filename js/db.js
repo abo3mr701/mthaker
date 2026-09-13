@@ -4,7 +4,7 @@
  */
 
 const DB_NAME    = 'mudhakir_db';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 // Store names
 const STORES = {
@@ -15,7 +15,9 @@ const STORES = {
   HISTORY:   'review_history',
   SETTINGS:  'settings',
   CHAT:      'chat_messages',
-  PLANS:     'review_plans', // Lesson-based review checklists (Deck-independent)
+  PLANS:     'review_plans',        // Lesson-based review checklists (Deck-independent)
+  ENG_CARDS: 'english_srs_cards',   // Per-word SRS state for the English section (Lexora-style)
+  ENG_WORDS: 'english_custom_words',// User-added English words (same shape as the built-in Oxford dataset)
 };
 
 /* ─── Category / Deck constants ───────────────────────────── */
@@ -63,6 +65,15 @@ function openDB() {
         const s = db.createObjectStore(STORES.PLANS, { keyPath: 'id' });
         s.createIndex('subjectId', 'subjectId', { unique: false });
         s.createIndex('createdAt', 'createdAt', { unique: false });
+      }
+
+      // v5: dedicated "English" section (Lexora-style) — fully independent of
+      // the general subjects/flashcards/reviews system.
+      if (!db.objectStoreNames.contains(STORES.ENG_CARDS)) {
+        db.createObjectStore(STORES.ENG_CARDS, { keyPath: 'id' }); // id = word id
+      }
+      if (!db.objectStoreNames.contains(STORES.ENG_WORDS)) {
+        db.createObjectStore(STORES.ENG_WORDS, { keyPath: 'id' });
       }
 
       // Files (metadata + extracted text; we don't store binary blobs)
@@ -258,6 +269,28 @@ export const reviewPlans = {
   delete:       (id)        => del(STORES.PLANS, id),
 };
 
+/* ─── English section (Lexora-style) — fully independent store ──
+ * englishCards: per-word SRS state, keyed by word id.
+ * englishWords: user's own custom-added English words (same shape as the
+ * built-in Oxford dataset in js/data/oxfordWords.js).
+ * ────────────────────────────────────────────────────────────── */
+export const englishCards = {
+  getAll:  ()     => getAll(STORES.ENG_CARDS),
+  getById: (id)   => getById(STORES.ENG_CARDS, id),
+  save:    (card) => put(STORES.ENG_CARDS, card),
+  bulkSave: async (cards) => {
+    await openDB();
+    const store = tx(STORES.ENG_CARDS, 'readwrite');
+    return Promise.all(cards.map(c => req2p(store.put(c))));
+  },
+};
+
+export const englishWords = {
+  getAll:  ()      => getAll(STORES.ENG_WORDS),
+  save:    (word)  => put(STORES.ENG_WORDS, word),
+  delete:  (id)    => del(STORES.ENG_WORDS, id),
+};
+
 /* ─── Settings ────────────────────────────────────────────── */
 export const settings = {
   get: async (key) => {
@@ -292,13 +325,11 @@ export async function getDashboardStats() {
     reviewPlans.getAll(),
   ]);
   const today = new Date().toISOString().slice(0, 10);
-  const englishCount   = allCards.filter(c => (c.category || 'عام') === 'إنجليزي').length;
   const plansDueToday  = plans.filter(p => (p.reviews || []).some(r => !r.done && r.dueDate <= today)).length;
   return {
     subjectCount:  allSubjects.length,
     cardCount:     allCards.length,
     dueCount:      due.length,
-    englishCount,
     planCount:     plans.length,
     plansDueToday,
     pomodoroStats: allSessions,

@@ -16,6 +16,7 @@ import { renderSubjects }      from './views/subjects.js';
 import { renderSubjectDetail } from './views/subject-detail.js';
 import { renderStudy }         from './views/study.js';
 import { renderReviews }       from './views/reviews.js';
+import { renderEnglish }       from './views/english.js';
 import { renderPomodoro }      from './views/pomodoro.js';
 import { renderSettings }      from './views/settings.js';
 import { renderChat }          from './views/chat.js';
@@ -30,10 +31,10 @@ const ROUTES = [
   { pattern: /^#?dashboard$/,         view: 'dashboard',      title: 'لوحة التحكم',     navId: 'dashboard'  },
   { pattern: /^#?subjects$/,          view: 'subjects',       title: 'المواد الدراسية', navId: 'subjects'   },
   { pattern: /^#?subject\/([^/]+)$/,  view: 'subject-detail', title: 'تفاصيل المادة',   navId: 'subjects'   },
-  { pattern: /^#?study\/([^/]+)\/([^/]+)$/, view: 'study',    title: 'مراجعة البطاقات',  navId: 'study'      },
   { pattern: /^#?study\/([^/]+)$/,    view: 'study',          title: 'مراجعة البطاقات',  navId: 'study'      },
   { pattern: /^#?study$/,             view: 'study',          title: 'مراجعة البطاقات',  navId: 'study'      },
   { pattern: /^#?reviews$/,           view: 'reviews',        title: 'المراجعات',        navId: 'reviews'    },
+  { pattern: /^#?english$/,           view: 'english',        title: 'الإنجليزية',       navId: 'english'    },
   { pattern: /^#?pomodoro$/,          view: 'pomodoro',       title: 'مؤقت بومودورو',   navId: 'pomodoro'   },
   { pattern: /^#?chat$/,              view: 'chat',           title: 'المساعد الذكي',   navId: 'chat'       },
   { pattern: /^#?settings$/,          view: 'settings',       title: 'الإعدادات',       navId: 'settings'   },
@@ -166,10 +167,13 @@ async function renderView(viewName, container, params) {
       return renderSubjectDetail(container, params[0]);
 
     case 'study':
-      return renderStudy(container, params[0] || null, params[1] ? decodeURIComponent(params[1]) : null);
+      return renderStudy(container, params[0] || null);
 
     case 'reviews':
       return renderReviews(container);
+
+    case 'english':
+      return renderEnglish(container);
 
     case 'pomodoro':
       return renderPomodoro(container);
