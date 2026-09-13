@@ -84,6 +84,11 @@ async function init() {
   setupSidebar();
   setupThemeToggles();
 
+  // Escape always exits English-section fullscreen mode (safety net)
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') document.getElementById('app')?.classList.remove('app-fullscreen');
+  });
+
   // Step 5: Start router
   window.addEventListener('hashchange', route);
   route(); // Initial route
@@ -117,6 +122,11 @@ async function route() {
   document.querySelectorAll('.nav-link').forEach(el => {
     el.classList.toggle('active', el.dataset.view === matched.navId);
   });
+
+  // Safety: leaving the English page always restores the sidebar
+  if (matched.view !== 'english') {
+    document.getElementById('app')?.classList.remove('app-fullscreen');
+  }
 
   // Update page title (topbar + document)
   const titleEl = document.getElementById('page-title');
