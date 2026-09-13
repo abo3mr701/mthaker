@@ -2,18 +2,20 @@
  * dashboard.js — Dashboard view
  */
 
-import { getDashboardStats, history as historyDB, flashcards as cardsDB, reviewPlans as plansDB } from '../db.js';
+import { getDashboardStats, history as historyDB, flashcards as cardsDB, reviewPlans as plansDB, englishCards as engCardsDB, settings } from '../db.js';
 import { formatDate, timeAgo, arabicCount, escHtml, todayStr } from '../utils/helpers.js';
+import { isDue as engIsDue } from '../services/englishSrs.js';
 
 export async function renderDashboard(container) {
   container.innerHTML = `<div class="flex-center" style="padding:var(--s10)"><div class="spinner"></div></div>`;
 
-  let stats, recent, duePlans;
+  let stats, recent, duePlans, engStats;
   try {
-    [stats, recent, duePlans] = await Promise.all([
+    [stats, recent, duePlans, engStats] = await Promise.all([
       getDashboardStats(),
       historyDB.getRecent(10),
       getPlansDueToday(),
+      getEnglishStats(),
     ]);
   } catch (err) {
     container.innerHTML = `<div class="empty-state"><p class="text-danger">خطأ في تحميل البيانات: ${err.message}</p></div>`;
@@ -75,10 +77,10 @@ export async function renderDashboard(container) {
         </div>
       </div>
       <div class="stat-card" id="dash-english-card" style="cursor:pointer">
-        <div class="stat-icon" style="background:var(--info-soft);">🇬🇧</div>
+        <div class="stat-icon" style="background:var(--info-soft);">📖</div>
         <div>
-          <div class="stat-val">${stats.englishCount}</div>
-          <div class="stat-lbl">كلمة إنجليزية</div>
+          <div class="stat-val">${engStats.streak} 🔥</div>
+          <div class="stat-lbl">سلسلة الإنجليزية${engStats.due ? ` — ${engStats.due} مستحقة` : ''}</div>
         </div>
       </div>
     </div>
@@ -103,7 +105,7 @@ export async function renderDashboard(container) {
             🗓️ خطط مراجعة الدروس
           </button>
           <button class="btn btn-secondary w-full" id="dash-goto-english">
-            🇬🇧 مراجعة الإنجليزية
+            📖 قسم الإنجليزية${engStats.due ? ` (${engStats.due})` : ''}
           </button>
         </div>
       </div>
@@ -152,10 +154,10 @@ export async function renderDashboard(container) {
     window.location.hash = '#reviews';
   });
   container.querySelector('#dash-english-card')?.addEventListener('click', () => {
-    window.location.hash = '#study/_/' + encodeURIComponent('إنجليزي');
+    window.location.hash = '#english';
   });
   container.querySelector('#dash-goto-english')?.addEventListener('click', () => {
-    window.location.hash = '#study/_/' + encodeURIComponent('إنجليزي');
+    window.location.hash = '#english';
   });
 
   // Responsive: stack on mobile
@@ -209,4 +211,14 @@ async function getPlansDueToday() {
     if (idx !== -1) due.push({ ...p, dueReviewIndex: idx + 1 });
   }
   return due;
+}
+
+/* ─── English section (قسم الإنجليزية) quick stats ────────────── */
+async function getEnglishStats() {
+  const [allCards, stats] = await Promise.all([
+    engCardsDB.getAll(),
+    settings.get('englishStats'),
+  ]);
+  const due = allCards.filter(c => engIsDue(c)).length;
+  return { due, streak: stats?.streak || 0 };
 }

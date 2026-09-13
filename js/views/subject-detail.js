@@ -3,7 +3,7 @@
  */
 
 import { subjects as subjectsDB, flashcards as cardsDB, files as filesDB, settings } from '../db.js';
-import { generateFlashcards, extractTextFromImage, generateWordInsight } from '../services/gemini.js';
+import { generateFlashcards, extractTextFromImage } from '../services/gemini.js';
 import { extractFileContent, needsVisionOCR, validateFile } from '../services/extractor.js';
 import { buildCard, stageLabel } from '../services/srs.js';
 import { refreshSubjectCardCount } from './subjects.js';
@@ -294,19 +294,12 @@ function hideAIStatus(container) {
 function renderCardsTab(subject, cards) {
   cards.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-  const categories = Array.from(new Set(['عام', 'إنجليزي', ...cards.map(c => c.category || 'عام')]));
-  const catFilterOptions = categories.map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
-
   return `
     <div class="page-hd" style="margin-bottom:var(--s6);">
       <div class="search-wrap" style="max-width:360px;flex:1;">
         <span class="search-icon">🔍</span>
         <input type="text" class="form-input" id="card-search" placeholder="ابحث في البطاقات…" dir="rtl">
       </div>
-      <select class="form-select" id="card-category-filter" style="min-width:150px;">
-        <option value="">كل الأقسام</option>
-        ${catFilterOptions}
-      </select>
       <button class="btn btn-primary btn-sm" id="btn-add-card">➕ بطاقة يدوية</button>
     </div>
 
@@ -322,19 +315,12 @@ function renderCardsTab(subject, cards) {
 }
 
 function cardItemHtml(c) {
-  const category = c.category || 'عام';
-  const isEnglish = category === 'إنجليزي';
   return `
     <div class="flashcard-item" data-card-id="${c.id}">
       <div class="flashcard-text" style="flex:1;">
-        <div class="front">
-          ${escHtml(c.front)}
-          ${isEnglish ? `<button class="tts-btn-inline" data-action="tts" data-text="${escHtml(c.front)}" title="نطق">🔊</button>` : ''}
-        </div>
-        <div class="back">${escHtml(truncate(c.translation || c.back, 120))}</div>
-        ${isEnglish && c.example ? `<div class="text-muted text-xs" style="margin-top:var(--s2);">📝 ${escHtml(truncate(c.example, 100))}</div>` : ''}
+        <div class="front">${escHtml(c.front)}</div>
+        <div class="back">${escHtml(truncate(c.back, 120))}</div>
         <span class="stage-badge">${stageLabel(c)}</span>
-        <span class="category-badge ${isEnglish ? 'category-badge-en' : ''}">${escHtml(category)}</span>
         ${c.lapses ? `<span class="lapses-badge" title="عدد الأخطاء">✗ ${c.lapses}</span>` : ''}
       </div>
       <div class="flashcard-actions">
@@ -347,14 +333,11 @@ function cardItemHtml(c) {
 
 function bindCardsTab(container, subject, cards) {
   const applyFilters = debounce(() => {
-    const q   = (container.querySelector('#card-search')?.value || '').trim().toLowerCase();
-    const cat = container.querySelector('#card-category-filter')?.value || '';
+    const q = (container.querySelector('#card-search')?.value || '').trim().toLowerCase();
 
-    const filtered = cards.filter(c => {
-      const matchesQ = !q || c.front.toLowerCase().includes(q) || c.back.toLowerCase().includes(q);
-      const matchesCat = !cat || (c.category || 'عام') === cat;
-      return matchesQ && matchesCat;
-    });
+    const filtered = cards.filter(c =>
+      !q || c.front.toLowerCase().includes(q) || c.back.toLowerCase().includes(q)
+    );
 
     const list = container.querySelector('#cards-list');
     if (!list) return;
@@ -364,9 +347,7 @@ function bindCardsTab(container, subject, cards) {
     rebindCardActions(container, subject, cards);
   }, 200);
 
-  // Search + category filter
   container.querySelector('#card-search')?.addEventListener('input', applyFilters);
-  container.querySelector('#card-category-filter')?.addEventListener('change', applyFilters);
 
   // Add card button
   container.querySelector('#btn-add-card')?.addEventListener('click', () => {
@@ -377,21 +358,6 @@ function bindCardsTab(container, subject, cards) {
 }
 
 function rebindCardActions(container, subject, cards) {
-  // Pronounce (English deck)
-  container.querySelectorAll('[data-action="tts"]').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const text = btn.dataset.text;
-      if (!('speechSynthesis' in window) || !text) return;
-      try {
-        window.speechSynthesis.cancel();
-        const utter = new SpeechSynthesisUtterance(text);
-        utter.lang = 'en-US';
-        window.speechSynthesis.speak(utter);
-      } catch { /* unsupported */ }
-    });
-  });
-
   // Edit
   container.querySelectorAll('[data-action="edit-card"]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -427,46 +393,19 @@ function openCardModal(container, subject, existing, cards) {
   titleEl.textContent = isEdit ? 'تعديل البطاقة' : 'بطاقة جديدة';
   backdrop.classList.remove('hidden');
 
-  const currentCategory = existing?.category || 'عام';
-
   bodyEl.innerHTML = `
     <div class="form-group">
-      <label class="form-label">التصنيف / القسم (Category)</label>
-      <select class="form-select" id="card-category">
-        <option value="عام" ${currentCategory === 'عام' ? 'selected' : ''}>عام</option>
-        <option value="إنجليزي" ${currentCategory === 'إنجليزي' ? 'selected' : ''}>إنجليزي</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label class="form-label" id="card-front-label">الوجه (السؤال) *</label>
+      <label class="form-label">الوجه (السؤال) *</label>
       <textarea class="form-textarea" id="card-front" rows="2" dir="auto"
         placeholder="أدخل السؤال أو المفهوم…">${escHtml(existing?.front || '')}</textarea>
       <span class="form-error" id="front-error">يرجى إدخال وجه البطاقة.</span>
     </div>
-
-    <div id="english-fields" class="${currentCategory === 'إنجليزي' ? '' : 'hidden'}">
-      <div style="margin-bottom:var(--s5);">
-        <button type="button" class="btn btn-secondary btn-sm" id="ai-word-btn">
-          ✨ توليد ترجمة ومثال بالذكاء الاصطناعي
-        </button>
-      </div>
-      <div class="form-group">
-        <label class="form-label">الترجمة</label>
-        <input type="text" class="form-input" id="card-translation" dir="auto" value="${escHtml(existing?.translation || '')}">
-      </div>
-      <div class="form-group">
-        <label class="form-label">مثال عملي (إنجليزي)</label>
-        <textarea class="form-textarea" id="card-example" rows="2" dir="ltr">${escHtml(existing?.example || '')}</textarea>
-      </div>
-    </div>
-
-    <div class="form-group" id="back-field-group">
-      <label class="form-label" id="card-back-label">الظهر (الإجابة) *</label>
+    <div class="form-group">
+      <label class="form-label">الظهر (الإجابة) *</label>
       <textarea class="form-textarea" id="card-back" rows="3" dir="auto"
         placeholder="أدخل الإجابة أو الشرح…">${escHtml(existing?.back || '')}</textarea>
       <span class="form-error" id="back-error">يرجى إدخال ظهر البطاقة.</span>
     </div>
-
     <div style="display:flex;gap:var(--s4);justify-content:flex-end;">
       <button class="btn btn-ghost" id="cancel-card-btn">إلغاء</button>
       <button class="btn btn-primary" id="save-card-btn">
@@ -485,71 +424,20 @@ function openCardModal(container, subject, existing, cards) {
   backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); }, { once: true });
   bodyEl.querySelector('#cancel-card-btn').addEventListener('click', close);
 
-  // Toggle English-only fields + labels when category changes
-  const categorySelect = bodyEl.querySelector('#card-category');
-  const englishFields   = bodyEl.querySelector('#english-fields');
-  const backGroup       = bodyEl.querySelector('#back-field-group');
-  const frontLabel      = bodyEl.querySelector('#card-front-label');
-  const backLabel       = bodyEl.querySelector('#card-back-label');
-
-  function syncCategoryUI() {
-    const isEn = categorySelect.value === 'إنجليزي';
-    englishFields.classList.toggle('hidden', !isEn);
-    frontLabel.textContent = isEn ? 'الكلمة / العبارة الإنجليزية *' : 'الوجه (السؤال) *';
-    backLabel.textContent  = isEn ? 'الظهر (اختياري إن استخدمت حقول الترجمة أعلاه)' : 'الظهر (الإجابة) *';
-    backGroup.querySelector('#back-error').textContent = isEn
-      ? 'يرجى إدخال الظهر أو تعبئة الترجمة أعلاه.'
-      : 'يرجى إدخال ظهر البطاقة.';
-  }
-  categorySelect.addEventListener('change', syncCategoryUI);
-  syncCategoryUI();
-
-  // AI: translation + example generation for English words
-  bodyEl.querySelector('#ai-word-btn')?.addEventListener('click', async () => {
-    const word = bodyEl.querySelector('#card-front').value.trim();
-    if (!word) { showToast('اكتب الكلمة الإنجليزية أولاً', 'warning'); return; }
-    const apiKey = await settings.get('geminiApiKey');
-    if (!apiKey) { showToast('أدخل مفتاح Gemini API في الإعدادات أولاً', 'warning', 5000); return; }
-
-    const btn = bodyEl.querySelector('#ai-word-btn');
-    btn.disabled = true; const original = btn.textContent; btn.textContent = '⏳ جاري التوليد…';
-    try {
-      const insight = await generateWordInsight(apiKey, word);
-      bodyEl.querySelector('#card-translation').value = insight.translation;
-      bodyEl.querySelector('#card-example').value = insight.example;
-      showToast('تم توليد الترجمة والمثال بنجاح', 'success');
-    } catch (err) {
-      showToast(err.message, 'error', 6000);
-    } finally {
-      btn.disabled = false; btn.textContent = original;
-    }
-  });
-
   bodyEl.querySelector('#save-card-btn').addEventListener('click', async () => {
-    const category = categorySelect.value;
-    const isEnglish = category === 'إنجليزي';
     const front = bodyEl.querySelector('#card-front').value.trim();
-    let   back  = bodyEl.querySelector('#card-back').value.trim();
-    const translation = isEnglish ? bodyEl.querySelector('#card-translation').value.trim() : '';
-    const example      = isEnglish ? bodyEl.querySelector('#card-example').value.trim() : '';
+    const back  = bodyEl.querySelector('#card-back').value.trim();
     const fe    = bodyEl.querySelector('#front-error');
     const be    = bodyEl.querySelector('#back-error');
     let valid   = true;
 
     if (!front) { fe.classList.add('visible'); valid = false; } else fe.classList.remove('visible');
-
-    // For English cards, either the "back" field OR the translation must be filled
-    if (isEnglish) {
-      if (!back && !translation) { be.classList.add('visible'); valid = false; } else be.classList.remove('visible');
-      if (!back) back = translation; // keep list views / old code paths working
-    } else {
-      if (!back) { be.classList.add('visible'); valid = false; } else be.classList.remove('visible');
-    }
+    if (!back)  { be.classList.add('visible'); valid = false; } else be.classList.remove('visible');
     if (!valid) return;
 
     const card = isEdit
-      ? { ...existing, front, back, category, translation, example }
-      : buildCard({ front, back, subjectId: subject.id, category, translation, example });
+      ? { ...existing, front, back }
+      : buildCard({ front, back, subjectId: subject.id });
 
     await cardsDB.save(card);
     await refreshSubjectCardCount(subject.id);

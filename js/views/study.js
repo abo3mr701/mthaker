@@ -5,67 +5,52 @@
  *  - يستخدم buildTodayQueue() الجديدة: ترتيب حسب الأولوية (أكثر خطأً ثم الأقدم)
  *    + تطبيق "الحد الأقصى للمراجعات اليومية" + تأجيل تلقائي للباقي على الأيام القادمة.
  *  - إمكانية تعديل الحد الأقصى مباشرة من نفس صفحة المراجعة (بدون الذهاب للإعدادات).
- *  - فلتر تصنيف (عام / إنجليزي / ...) بجانب فلتر المادة.
- *  - زر نطق (TTS) لبطاقات قسم الإنجليزي + عرض الترجمة والمثال إن وُجدا.
+ *
+ * ملاحظة: فلتر تصنيف "إنجليزي" القديم أُزيل من هنا — قسم الإنجليزية أصبح
+ * صفحة مستقلة كاملة («الإنجليزية» في القائمة الجانبية) بنظامه الخاص.
  */
 
 import { flashcards as cardsDB, subjects as subjectsDB } from '../db.js';
 import { processReview, buildTodayQueue, getMaxDailyReviews, setMaxDailyReviews } from '../services/srs.js';
 import { showToast, escHtml } from '../utils/helpers.js';
 
-const ENGLISH_CATEGORY = 'إنجليزي';
-
-export async function renderStudy(container, subjectId = null, category = null) {
+export async function renderStudy(container, subjectId = null) {
   container.innerHTML = `<div class="flex-center" style="padding:var(--s10)"><div class="spinner"></div></div>`;
 
-  const [allSubjects, allCategories, maxDaily, result] = await Promise.all([
+  const [allSubjects, maxDaily, result] = await Promise.all([
     subjectsDB.getAll(),
-    cardsDB.getCategories(),
     getMaxDailyReviews(),
-    buildTodayQueue({ subjectId, category }),
+    buildTodayQueue({ subjectId }),
   ]);
 
   if (result.queue.length === 0) {
-    renderNoDueCards(container, allSubjects, allCategories, subjectId, category, maxDaily, result);
+    renderNoDueCards(container, allSubjects, subjectId, maxDaily, result);
     return;
   }
 
   const shuffled = shuffleArray([...result.queue]);
-  renderSession(container, shuffled, allSubjects, allCategories, subjectId, category, maxDaily, result);
+  renderSession(container, shuffled, allSubjects, subjectId, maxDaily, result);
 }
 
-/* ─── Shared header: subject + category filters + max-daily editor ── */
-function renderFiltersBar(subjects, categories, currentSubjectId, currentCategory) {
+/* ─── Shared header: subject filter ──────────────────────────── */
+function renderFiltersBar(subjects, currentSubjectId) {
   const subjectOptions = subjects.map(s =>
     `<option value="${s.id}" ${s.id === currentSubjectId ? 'selected' : ''}>${escHtml(s.name)}</option>`
   ).join('');
 
-  const categoryOptions = categories.map(c =>
-    `<option value="${escHtml(c)}" ${c === currentCategory ? 'selected' : ''}>${c === ENGLISH_CATEGORY ? '🇬🇧 ' : ''}${escHtml(c)}</option>`
-  ).join('');
-
-  const allSelected = !currentSubjectId || currentSubjectId === '_';
   return `
-    <select class="form-select" id="subject-filter" style="min-width:160px;">
-      <option value="" ${allSelected ? 'selected' : ''}>جميع المواد</option>
+    <select class="form-select" id="subject-filter" style="min-width:180px;">
+      <option value="">جميع المواد</option>
       ${subjectOptions}
-    </select>
-    <select class="form-select" id="category-filter" style="min-width:160px;">
-      <option value="">كل الأقسام</option>
-      ${categoryOptions}
     </select>
   `;
 }
 
-function bindFiltersBar(container, currentSubjectId, currentCategory) {
-  const go = () => {
-    const s = container.querySelector('#subject-filter')?.value || '_';
-    const c = container.querySelector('#category-filter')?.value || '';
-    if (!s && !c) { window.location.hash = '#study'; return; }
-    window.location.hash = c ? `#study/${s || '_'}/${encodeURIComponent(c)}` : `#study/${s || '_'}`;
-  };
-  container.querySelector('#subject-filter')?.addEventListener('change', go);
-  container.querySelector('#category-filter')?.addEventListener('change', go);
+function bindFiltersBar(container, currentSubjectId) {
+  container.querySelector('#subject-filter')?.addEventListener('change', (e) => {
+    const s = e.target.value;
+    window.location.hash = s ? `#study/${s}` : '#study';
+  });
 }
 
 /* ─── Inline "max daily reviews" editor (no need to visit settings) ── */
@@ -82,25 +67,24 @@ function renderMaxDailyBox(maxDaily, result) {
   `;
 }
 
-function bindMaxDailyBox(container, subjectId, category) {
+function bindMaxDailyBox(container, subjectId) {
   container.querySelector('#max-daily-save')?.addEventListener('click', async () => {
     const val = container.querySelector('#max-daily-input').value;
     await setMaxDailyReviews(val);
     showToast('تم تحديث الحد الأقصى للمراجعات اليومية', 'success');
-    // Re-render session with the new cap applied immediately
-    renderStudy(container, subjectId, category);
+    renderStudy(container, subjectId);
   });
 }
 
-function renderNoDueCards(container, subjects, categories, currentSubjectId, currentCategory, maxDaily, result) {
+function renderNoDueCards(container, subjects, currentSubjectId, maxDaily, result) {
   container.innerHTML = `
     <div class="page-hd">
       <div class="page-hd-text">
-        <h2>${currentCategory === ENGLISH_CATEGORY ? '🇬🇧 مراجعة الإنجليزية' : 'مراجعة البطاقات'}</h2>
+        <h2>مراجعة البطاقات</h2>
         <p>مراجعة البطاقات التعليمية بنظام التكرار المتباعد</p>
       </div>
       <div class="flex gap-3 wrap">
-        ${renderFiltersBar(subjects, categories, currentSubjectId, currentCategory)}
+        ${renderFiltersBar(subjects, currentSubjectId)}
       </div>
     </div>
 
@@ -109,11 +93,11 @@ function renderNoDueCards(container, subjects, categories, currentSubjectId, cur
     <div class="study-done">
       <div class="study-done-icon">🎉</div>
       <h3 class="study-done-title">
-        ${currentSubjectId || currentCategory ? 'لا توجد بطاقات مستحقة ضمن هذا الفلتر' : 'أنجزت جميع مراجعاتك اليوم!'}
+        ${currentSubjectId ? 'لا توجد بطاقات مستحقة ضمن هذه المادة' : 'أنجزت جميع مراجعاتك اليوم!'}
       </h3>
       <p class="text-muted">
-        ${currentSubjectId || currentCategory
-          ? 'جميع البطاقات ضمن هذا الفلتر ستظهر في موعدها القادم.'
+        ${currentSubjectId
+          ? 'جميع بطاقات هذه المادة ستظهر في موعدها القادم.'
           : 'ممتاز! عد غداً للمراجعة التالية.'}
       </p>
       <div style="margin-top:var(--s8);display:flex;gap:var(--s5);justify-content:center;flex-wrap:wrap;">
@@ -124,11 +108,11 @@ function renderNoDueCards(container, subjects, categories, currentSubjectId, cur
     </div>
   `;
 
-  bindFiltersBar(container, currentSubjectId, currentCategory);
-  bindMaxDailyBox(container, currentSubjectId, currentCategory);
+  bindFiltersBar(container, currentSubjectId);
+  bindMaxDailyBox(container, currentSubjectId);
 }
 
-function renderSession(container, cards, subjects, categories, currentSubjectId, currentCategory, maxDaily, result) {
+function renderSession(container, cards, subjects, currentSubjectId, maxDaily, result) {
   const total = cards.length;
   let index   = 0;
   let correct = 0;
@@ -138,10 +122,10 @@ function renderSession(container, cards, subjects, categories, currentSubjectId,
   container.innerHTML = `
     <div class="page-hd">
       <div class="page-hd-text">
-        <h2>${currentCategory === ENGLISH_CATEGORY ? '🇬🇧 مراجعة الإنجليزية' : 'مراجعة البطاقات'}</h2>
+        <h2>مراجعة البطاقات</h2>
       </div>
       <div class="flex gap-3 wrap">
-        ${renderFiltersBar(subjects, categories, currentSubjectId, currentCategory)}
+        ${renderFiltersBar(subjects, currentSubjectId)}
       </div>
     </div>
 
@@ -157,14 +141,11 @@ function renderSession(container, cards, subjects, categories, currentSubjectId,
          tabindex="0" aria-label="انقر لقلب البطاقة">
       <div class="study-card-inner" id="card-inner">
         <div class="study-card-face study-card-front">
-          <button class="tts-btn hidden" id="tts-front-btn" title="نطق الكلمة">🔊</button>
           <p class="study-card-text" id="card-front-text" dir="auto"></p>
           <p class="study-card-hint">انقر للكشف عن الإجابة</p>
         </div>
         <div class="study-card-face study-card-back">
-          <button class="tts-btn hidden" id="tts-back-btn" title="نطق الجملة">🔊</button>
           <p class="study-card-text" id="card-back-text" dir="auto"></p>
-          <p class="study-card-extra" id="card-extra-text"></p>
           <p class="study-card-hint">كيف كانت إجابتك؟</p>
         </div>
       </div>
@@ -182,45 +163,17 @@ function renderSession(container, cards, subjects, categories, currentSubjectId,
     </p>
   `;
 
-  bindFiltersBar(container, currentSubjectId, currentCategory);
-  bindMaxDailyBox(container, currentSubjectId, currentCategory);
-
-  function isEnglish(card) { return (card.category || 'عام') === ENGLISH_CATEGORY; }
-
-  function speak(text, btn) {
-    if (!('speechSynthesis' in window) || !text) return;
-    try {
-      window.speechSynthesis.cancel();
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.lang = 'en-US';
-      utter.rate = 0.95;
-      window.speechSynthesis.speak(utter);
-    } catch { /* Web Speech API unsupported — silently ignore */ }
-  }
+  bindFiltersBar(container, currentSubjectId);
+  bindMaxDailyBox(container, currentSubjectId);
 
   function showCard(i) {
     if (i >= total) { showCompletion(); return; }
     flipped = false;
     const card = cards[i];
-    const english = isEnglish(card);
 
     container.querySelector('#card-inner').classList.remove('flipped');
     container.querySelector('#card-front-text').textContent = card.front;
-
-    // Back: translation + example (English deck) or the plain "back" text
-    let backHtml = escHtml(card.back || '');
-    let extraHtml = '';
-    if (english && (card.translation || card.example)) {
-      backHtml = card.translation ? `<strong>${escHtml(card.translation)}</strong>` : backHtml;
-      if (card.example) {
-        extraHtml = `📝 ${escHtml(card.example)}`;
-      }
-    }
-    container.querySelector('#card-back-text').innerHTML = backHtml || '—';
-    container.querySelector('#card-extra-text').textContent = extraHtml;
-
-    container.querySelector('#tts-front-btn').classList.toggle('hidden', !english);
-    container.querySelector('#tts-back-btn').classList.toggle('hidden', !(english && card.example));
+    container.querySelector('#card-back-text').innerHTML = escHtml(card.back || '') || '—';
 
     container.querySelector('#study-actions').style.display = 'none';
     container.querySelector('#study-counter').textContent   = `البطاقة ${i + 1} من ${total}`;
@@ -277,7 +230,7 @@ function renderSession(container, cards, subjects, categories, currentSubjectId,
     `;
 
     container.querySelector('#study-again-btn')?.addEventListener('click', () => {
-      renderStudy(container, currentSubjectId, currentCategory);
+      renderStudy(container, currentSubjectId);
     });
   }
 
@@ -290,15 +243,6 @@ function renderSession(container, cards, subjects, categories, currentSubjectId,
 
   container.querySelector('#btn-correct').addEventListener('click', () => handleRating(true));
   container.querySelector('#btn-wrong').addEventListener('click',   () => handleRating(false));
-
-  container.querySelector('#tts-front-btn').addEventListener('click', (e) => {
-    e.stopPropagation();
-    speak(cards[index].front);
-  });
-  container.querySelector('#tts-back-btn').addEventListener('click', (e) => {
-    e.stopPropagation();
-    speak(cards[index].example || cards[index].front);
-  });
 
   // Keyboard shortcuts — self-removes once #study-scene leaves the DOM
   const keyHandler = (e) => {
