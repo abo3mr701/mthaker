@@ -135,6 +135,7 @@ async function ensureTodayQueue() {
 /* ─── Shell + tab switching ───────────────────────────────────── */
 function paint(container) {
   const dueCount = Object.values(S.cards).filter(c => isDue(c)).length;
+  const isFullscreen = document.getElementById('app')?.classList.contains('app-fullscreen');
 
   container.innerHTML = `
     <div class="eng-page">
@@ -144,7 +145,12 @@ function paint(container) {
           <span class="eng-brand-name">الإنجليزية</span>
           <span class="eng-brand-sub">Oxford 3000 · SRS بأسلوب Anki</span>
         </div>
-        <div class="eng-streak-pill">🔥 <b>${S.stats.streak}</b> يوم متتالي</div>
+        <div class="eng-header-actions">
+          <div class="eng-streak-pill">🔥 <b>${S.stats.streak}</b> يوم متتالي</div>
+          <button class="eng-fullscreen-btn" id="eng-fullscreen-btn" title="${isFullscreen ? 'الخروج من ملء الشاشة' : 'ملء الشاشة'}">
+            ${isFullscreen ? '✕ خروج' : '⛶ ملء الشاشة'}
+          </button>
+        </div>
       </div>
 
       <div class="eng-tabs">
@@ -165,6 +171,11 @@ function paint(container) {
     });
   });
 
+  container.querySelector('#eng-fullscreen-btn')?.addEventListener('click', () => {
+    document.getElementById('app')?.classList.toggle('app-fullscreen');
+    paint(container);
+  });
+
   const content = container.querySelector('#eng-content');
   if (S.activeTab === 'today') renderTodayTab(container, content);
   else if (S.activeTab === 'mydeck') renderMyDeckTab(container, content);
@@ -180,6 +191,7 @@ function renderDashboardTab(container, el) {
   const todayTotal = S.queue.wordIds.length;
   const todayDone  = S.queue.wordIds.filter(id => wasReviewedToday(S.cards[id])).length;
   const pct = todayTotal ? Math.min(100, Math.round((todayDone / todayTotal) * 100)) : 0;
+  const levelStats = computeLevelStats();
 
   el.innerHTML = `
     <div class="eng-stat-grid">
@@ -203,6 +215,15 @@ function renderDashboardTab(container, el) {
         <div class="eng-stat-val">${totalSeen}/${totalBank}</div>
         <div class="eng-stat-sub">${remaining} كلمة متبقية</div>
       </div>
+    </div>
+
+    <div class="eng-level-breakdown">
+      ${['A1', 'A2', 'B1', 'B2'].map(lvl => `
+        <div class="eng-level-chip level-${lvl.toLowerCase()}">
+          <span>${lvl}</span>
+          <b>${levelStats[lvl].seen}/${levelStats[lvl].total}</b>
+        </div>
+      `).join('')}
     </div>
 
     <div class="eng-two-col">
@@ -248,6 +269,19 @@ function wasReviewedToday(card) {
   const d = new Date(card.lastReviewed);
   const now = new Date();
   return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+}
+
+// Dynamic per-CEFR-level breakdown — recomputed from the live word bank every
+// render, so it automatically reflects any words added later (custom or
+// future dataset expansions), never hardcoded to today's 405-word count.
+function computeLevelStats() {
+  const stats = { A1: { total: 0, seen: 0 }, A2: { total: 0, seen: 0 }, B1: { total: 0, seen: 0 }, B2: { total: 0, seen: 0 } };
+  S.wordBank.forEach(w => {
+    const lvl = stats[w.level] ? w.level : 'A1';
+    stats[lvl].total += 1;
+    if (S.seenIds.has(w.id)) stats[lvl].seen += 1;
+  });
+  return stats;
 }
 
 function openTargetModal(container) {
