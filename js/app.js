@@ -17,7 +17,6 @@ import { renderSubjectDetail } from './views/subject-detail.js';
 import { renderStudy }         from './views/study.js';
 import { renderReviews }       from './views/reviews.js';
 import { renderEnglish }       from './views/english.js';
-import { renderCalendar }      from './views/calendar.js';
 import { renderPomodoro }      from './views/pomodoro.js';
 import { renderSettings }      from './views/settings.js';
 import { renderChat }          from './views/chat.js';
@@ -36,7 +35,6 @@ const ROUTES = [
   { pattern: /^#?study$/,             view: 'study',          title: 'مراجعة البطاقات',  navId: 'study'      },
   { pattern: /^#?reviews$/,           view: 'reviews',        title: 'المراجعات',        navId: 'reviews'    },
   { pattern: /^#?english$/,           view: 'english',        title: 'الإنجليزية',       navId: 'english'    },
-  { pattern: /^#?calendar$/,          view: 'calendar',       title: 'التقويم',          navId: 'calendar'   },
   { pattern: /^#?pomodoro$/,          view: 'pomodoro',       title: 'مؤقت بومودورو',   navId: 'pomodoro'   },
   { pattern: /^#?chat$/,              view: 'chat',           title: 'المساعد الذكي',   navId: 'chat'       },
   { pattern: /^#?settings$/,          view: 'settings',       title: 'الإعدادات',       navId: 'settings'   },
@@ -176,9 +174,6 @@ async function renderView(viewName, container, params) {
 
     case 'english':
       return renderEnglish(container);
-
-    case 'calendar':
-      return renderCalendar(container);
 
     case 'pomodoro':
       return renderPomodoro(container);
