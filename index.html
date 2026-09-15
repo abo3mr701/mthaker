@@ -10,7 +10,7 @@
   <!-- Arabic Font: Tajawal -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800;900&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;800;900&display=swap" rel="stylesheet">
 
   <!-- PDF.js (text extraction from PDFs) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -58,6 +58,9 @@
         <li><a href="#english" class="nav-link" data-view="english">
           <span class="nav-icon">&#x1F4D6;</span><span>الإنجليزية</span>
         </a></li>
+        <li><a href="#calendar" class="nav-link" data-view="calendar">
+          <span class="nav-icon">&#x1F4C5;</span><span>التقويم</span>
+        </a></li>
         <li><a href="#pomodoro" class="nav-link" data-view="pomodoro">
           <span class="nav-icon">&#x23F1;</span><span>مؤقت بومودورو</span>
         </a></li>
@@ -79,6 +82,15 @@
 
     <!-- Mobile overlay -->
     <div id="overlay" class="overlay" role="presentation"></div>
+
+    <!-- Floating button to bring the sidebar back after collapsing it (desktop) -->
+    <button id="sidebar-reopen" class="sidebar-reopen-btn hidden" aria-label="إظهار القائمة الجانبية" title="إظهار القائمة">
+      <svg width="20" height="15" viewBox="0 0 22 16" fill="none">
+        <rect width="22" height="2.5" rx="1.25" fill="currentColor"/>
+        <rect y="6.75" width="22" height="2.5" rx="1.25" fill="currentColor"/>
+        <rect y="13.5" width="22" height="2.5" rx="1.25" fill="currentColor"/>
+      </svg>
+    </button>
 
     <!-- Main content area -->
     <main id="main" class="main-area" role="main">
