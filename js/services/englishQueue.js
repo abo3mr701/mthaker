@@ -8,7 +8,7 @@
  */
 
 const EASY_LEVELS = new Set(['A1', 'A2']);
-const HARD_LEVELS = new Set(['B1', 'B2', 'C1']);
+const HARD_LEVELS = new Set(['B1', 'B2', 'C1', 'C2']);
 
 function shuffle(arr) {
   const a = [...arr];
