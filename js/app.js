@@ -17,6 +17,7 @@ import { renderSubjectDetail } from './views/subject-detail.js';
 import { renderStudy }         from './views/study.js';
 import { renderReviews }       from './views/reviews.js';
 import { renderEnglish }       from './views/english.js';
+import { renderCalendar }      from './views/calendar.js';
 import { renderPomodoro }      from './views/pomodoro.js';
 import { renderSettings }      from './views/settings.js';
 import { renderChat }          from './views/chat.js';
@@ -35,6 +36,7 @@ const ROUTES = [
   { pattern: /^#?study$/,             view: 'study',          title: 'مراجعة البطاقات',  navId: 'study'      },
   { pattern: /^#?reviews$/,           view: 'reviews',        title: 'المراجعات',        navId: 'reviews'    },
   { pattern: /^#?english$/,           view: 'english',        title: 'الإنجليزية',       navId: 'english'    },
+  { pattern: /^#?calendar$/,          view: 'calendar',       title: 'التقويم',          navId: 'calendar'   },
   { pattern: /^#?pomodoro$/,          view: 'pomodoro',       title: 'مؤقت بومودورو',   navId: 'pomodoro'   },
   { pattern: /^#?chat$/,              view: 'chat',           title: 'المساعد الذكي',   navId: 'chat'       },
   { pattern: /^#?settings$/,          view: 'settings',       title: 'الإعدادات',       navId: 'settings'   },
@@ -84,11 +86,6 @@ async function init() {
   setupSidebar();
   setupThemeToggles();
 
-  // Escape always exits English-section fullscreen mode (safety net)
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') document.getElementById('app')?.classList.remove('app-fullscreen');
-  });
-
   // Step 5: Start router
   window.addEventListener('hashchange', route);
   route(); // Initial route
@@ -122,11 +119,6 @@ async function route() {
   document.querySelectorAll('.nav-link').forEach(el => {
     el.classList.toggle('active', el.dataset.view === matched.navId);
   });
-
-  // Safety: leaving the English page always restores the sidebar
-  if (matched.view !== 'english') {
-    document.getElementById('app')?.classList.remove('app-fullscreen');
-  }
 
   // Update page title (topbar + document)
   const titleEl = document.getElementById('page-title');
@@ -185,6 +177,9 @@ async function renderView(viewName, container, params) {
     case 'english':
       return renderEnglish(container);
 
+    case 'calendar':
+      return renderCalendar(container);
+
     case 'pomodoro':
       return renderPomodoro(container);
 
@@ -201,14 +196,28 @@ async function renderView(viewName, container, params) {
 
 /* ─── Sidebar ───────────────────────────────────────────────── */
 function setupSidebar() {
-  const sidebar  = document.getElementById('sidebar');
-  const menuBtn  = document.getElementById('menu-btn');
-  const closeBtn = document.getElementById('sidebar-close');
-  const overlay  = document.getElementById('overlay');
+  const sidebar    = document.getElementById('sidebar');
+  const menuBtn    = document.getElementById('menu-btn');
+  const closeBtn   = document.getElementById('sidebar-close');
+  const overlay    = document.getElementById('overlay');
+  const reopenBtn  = document.getElementById('sidebar-reopen');
 
   menuBtn?.addEventListener('click', openSidebar);
-  closeBtn?.addEventListener('click', closeSidebar);
+
+  // The X button: on mobile it closes the slide-over overlay; on desktop it
+  // collapses the sidebar entirely (a floating ☰ button brings it back).
+  closeBtn?.addEventListener('click', () => {
+    closeSidebar();
+    document.body.classList.add('sidebar-collapsed');
+    reopenBtn?.classList.remove('hidden');
+  });
+
   overlay?.addEventListener('click', closeSidebar);
+
+  reopenBtn?.addEventListener('click', () => {
+    document.body.classList.remove('sidebar-collapsed');
+    reopenBtn.classList.add('hidden');
+  });
 
   // Close sidebar on Escape key
   document.addEventListener('keydown', (e) => {
