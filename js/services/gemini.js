@@ -199,7 +199,7 @@ export async function generateEnglishWordEntry(apiKey, word) {
 أعطني بصيغة JSON فقط (بدون أي نص إضافي أو Markdown):
 {
   "pos": "نوع الكلمة اختصاراً بالإنجليزي (مثل n. أو v. أو adj.)",
-  "level": "أحد المستويات التالية بالضبط: A1 أو A2 أو B1 أو B2",
+  "level": "أحد المستويات التالية بالضبط: A1 أو A2 أو B1 أو B2 أو C1 أو C2",
   "ar": "الترجمة العربية الدقيقة والمختصرة",
   "definition": "تعريف بسيط بالإنجليزية",
   "examples": {
@@ -222,7 +222,7 @@ export async function generateEnglishWordEntry(apiKey, word) {
     data = JSON.parse(match[0]);
   }
 
-  const validLevels = ['A1', 'A2', 'B1', 'B2'];
+  const validLevels = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
   return {
     pos:        (data.pos || '').trim(),
     level:      validLevels.includes(data.level) ? data.level : 'A1',
@@ -249,6 +249,44 @@ export async function askAboutWord(apiKey, word, question) {
   const prompt = `أنت مدرّس لغة إنجليزية ودود يشرح بالعربية. إليك سياق الكلمة:\n${context}\n\nسؤال الطالب: ${q}\n\nأجب بإيجاز ووضوح بالعربية (مع أمثلة إنجليزية عند الحاجة).`;
 
   return callGemini(apiKey, [{ role: 'user', parts: [{ text: prompt }] }], { temperature: 0.5 });
+}
+
+/* ─── English section: extract candidate English words from raw text ──
+ * Used by the "استيراد من ملف/صورة" feature — takes whatever text was
+ * extracted from an uploaded file/image (via extractor.js / OCR) and
+ * returns a clean, de-duplicated list of English words/phrases worth
+ * adding as vocabulary (skips common stop-words, numbers, punctuation).
+ * ──────────────────────────────────────────────────────────── */
+export async function extractEnglishWordList(apiKey, text) {
+  const clean = (text || '').trim();
+  if (!clean) throw new Error('لا يوجد نص لاستخراج الكلمات منه.');
+
+  const prompt = `
+من النص الإنجليزي التالي، استخرج قائمة بأهم الكلمات أو العبارات الإنجليزية
+المفيدة لتعلّم المفردات (تجاهل الكلمات الشائعة جداً مثل the, is, a, and، وتجاهل
+الأرقام والأسماء العلمية). أعد حتى 60 كلمة كحد أقصى، بدون تكرار.
+
+النص:
+"""${clean.slice(0, 6000)}"""
+
+أجب بصيغة JSON فقط بدون أي نص إضافي، بهذا الشكل:
+{ "words": ["word1", "word2", "..."] }
+`.trim();
+
+  const raw = await callGemini(apiKey, [{ role: 'user', parts: [{ text: prompt }] }], { temperature: 0.2 });
+  const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+
+  let data;
+  try {
+    data = JSON.parse(cleaned);
+  } catch {
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('تعذّر تحليل استجابة الذكاء الاصطناعي. حاول مرة أخرى.');
+    data = JSON.parse(match[0]);
+  }
+
+  const words = Array.isArray(data.words) ? data.words : [];
+  return Array.from(new Set(words.map(w => (w || '').trim()).filter(Boolean)));
 }
 
 /* ─── OCR: extract text from a base64 image ──────────────── */
