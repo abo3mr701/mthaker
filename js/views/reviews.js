@@ -7,24 +7,27 @@
  * من صفحة المادة نفسها).
  */
 
-import { reviewPlans as plansDB, subjects as subjectsDB, flashcards as cardsDB } from '../db.js';
+import { reviewPlans as plansDB, subjects as subjectsDB, flashcards as cardsDB, settings } from '../db.js';
 import { buildCard } from '../services/srs.js';
 import { uid, showToast, showConfirm, escHtml, todayStr, addDays } from '../utils/helpers.js';
 import { refreshSubjectCardCount } from './subjects.js';
 
 const DEFAULT_OFFSETS = [1, 3, 7, 21, 40];
+const DEFAULT_MAX_DAILY = 10;
 
 let _allPlans = [];
 let _allSubjects = [];
-let _todayOnly = false;
+let _filterMode = 'all'; // 'all' | 'today' | 'overdue'
+let _maxDaily = DEFAULT_MAX_DAILY;
 
 export async function renderReviews(container) {
   container.innerHTML = `<div class="flex-center" style="padding:var(--s10)"><div class="spinner"></div></div>`;
 
   try {
-    [_allPlans, _allSubjects] = await Promise.all([
+    [_allPlans, _allSubjects, _maxDaily] = await Promise.all([
       plansDB.getAll(),
       subjectsDB.getAll(),
+      loadMaxDaily(),
     ]);
   } catch (err) {
     container.innerHTML = `<div class="empty-state"><p class="text-danger">خطأ: ${err.message}</p></div>`;
@@ -35,28 +38,77 @@ export async function renderReviews(container) {
   renderUI(container);
 }
 
+async function loadMaxDaily() {
+  const val = await settings.get('reviewsMaxDaily');
+  return Number.isFinite(val) && val > 0 ? val : DEFAULT_MAX_DAILY;
+}
+
+// كل "مراجعة" (checkpoint) غير منجزة عبر كل الدروس — تُصنّف اليوم/فائتة
+function collectReviewItems() {
+  const today = todayStr();
+  const todayItems = [];
+  const overdueItems = [];
+
+  _allPlans.forEach(plan => {
+    (plan.reviews || []).forEach((r, i) => {
+      if (r.done) return;
+      const item = { plan, review: r, index: i };
+      if (r.dueDate === today) todayItems.push(item);
+      else if (r.dueDate < today) overdueItems.push(item);
+    });
+  });
+
+  // الأولوية للفائتة: الأقدم أولاً (أطول انتظار = أولوية أعلى)
+  overdueItems.sort((a, b) => a.review.dueDate.localeCompare(b.review.dueDate));
+
+  return { todayItems, overdueItems };
+}
+
 function renderUI(container) {
-  const dueTodayCount = _allPlans.filter(p => planHasDueToday(p)).length;
-  const visiblePlans  = _todayOnly ? _allPlans.filter(p => planHasDueToday(p)) : _allPlans;
+  const { todayItems, overdueItems } = collectReviewItems();
+  const todayCount   = todayItems.length;
+  const overdueCount = overdueItems.length;
+
+  let visiblePlans;
+  let cappedNote = '';
+  if (_filterMode === 'today' || _filterMode === 'overdue') {
+    const items = _filterMode === 'today' ? todayItems : overdueItems;
+    const capped = items.slice(0, _maxDaily);
+    const planIds = new Set(capped.map(it => it.plan.id));
+    visiblePlans = _allPlans.filter(p => planIds.has(p.id));
+    if (items.length > _maxDaily) {
+      cappedNote = `⏳ عرض ${_maxDaily} من أصل ${items.length} — ارفع "الحد اليومي" لعرض المزيد.`;
+    }
+  } else {
+    visiblePlans = _allPlans;
+  }
 
   container.innerHTML = `
     <div class="page-hd">
       <div class="page-hd-text">
         <h2>المراجعات</h2>
-        <p>${_allPlans.length ? `${_allPlans.length} خطة مراجعة${dueTodayCount ? ` — ${dueTodayCount} تحتاج مراجعة اليوم` : ''}` : 'خطط مراجعة الدروس — مستقلة عن البطاقات التعليمية'}</p>
+        <p>${_allPlans.length ? `${_allPlans.length} خطة مراجعة` : 'خطط مراجعة الدروس — مستقلة عن البطاقات التعليمية'}</p>
       </div>
-      <div class="flex gap-3 wrap">
-        <button class="btn ${_todayOnly ? 'btn-warning-active' : 'btn-secondary'}" id="btn-today-filter">
-          📅 اليوم${dueTodayCount ? ` (${dueTodayCount})` : ''}
-        </button>
-        <button class="btn btn-primary" id="btn-new-plan">➕ درس جديد للمراجعة</button>
-      </div>
+      <button class="btn btn-primary" id="btn-new-plan">➕ درس جديد للمراجعة</button>
+    </div>
+
+    <div class="max-daily-box" id="reviews-max-daily-box">
+      <span class="max-daily-lbl">🎚️ الحد اليومي للمراجعات</span>
+      <input type="number" id="reviews-max-daily-input" class="max-daily-input" min="1" step="1" value="${_maxDaily}">
+      <button class="btn btn-sm btn-secondary" id="reviews-max-daily-save">حفظ</button>
+      ${cappedNote ? `<span class="max-daily-note">${cappedNote}</span>` : ''}
+    </div>
+
+    <div class="flex gap-3 wrap" style="margin-bottom:var(--s6);">
+      <button class="btn ${_filterMode === 'all' ? 'btn-primary' : 'btn-secondary'}" data-filter="all">📋 الكل (${_allPlans.length})</button>
+      <button class="btn ${_filterMode === 'today' ? 'btn-warning-active' : 'btn-secondary'}" data-filter="today">📅 اليوم (${todayCount})</button>
+      <button class="btn ${_filterMode === 'overdue' ? 'btn-danger' : 'btn-secondary'}" data-filter="overdue">⚠️ الفائتة (${overdueCount})</button>
     </div>
 
     <div class="review-plan-grid" id="plans-grid">
       ${visiblePlans.length === 0
-        ? (_todayOnly
-            ? `<div class="empty-state" style="grid-column:1/-1;"><div class="empty-icon">✅</div><h3 class="empty-title">ما فيه شي مستحق اليوم</h3><p class="empty-sub">كل دروسك مجدولة بمواعيدها القادمة.</p></div>`
+        ? (_filterMode !== 'all'
+            ? `<div class="empty-state" style="grid-column:1/-1;"><div class="empty-icon">✅</div><h3 class="empty-title">${_filterMode === 'today' ? 'ما فيه شي مستحق اليوم' : 'ما فيه مراجعات فائتة 🎉'}</h3></div>`
             : emptyState())
         : visiblePlans.map(p => renderPlanCard(p)).join('')
       }
@@ -64,8 +116,17 @@ function renderUI(container) {
   `;
 
   container.querySelector('#btn-new-plan')?.addEventListener('click', () => openPlanModal(container));
-  container.querySelector('#btn-today-filter')?.addEventListener('click', () => {
-    _todayOnly = !_todayOnly;
+  container.querySelectorAll('[data-filter]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _filterMode = btn.dataset.filter;
+      renderUI(container);
+    });
+  });
+  container.querySelector('#reviews-max-daily-save')?.addEventListener('click', async () => {
+    const val = Math.max(1, parseInt(container.querySelector('#reviews-max-daily-input').value, 10) || DEFAULT_MAX_DAILY);
+    _maxDaily = val;
+    await settings.set('reviewsMaxDaily', val);
+    showToast('تم تحديث الحد اليومي للمراجعات', 'success');
     renderUI(container);
   });
   bindPlanCardEvents(container);
@@ -81,11 +142,6 @@ function emptyState() {
   `;
 }
 
-function planHasDueToday(plan) {
-  const today = todayStr();
-  return (plan.reviews || []).some(r => !r.done && r.dueDate <= today);
-}
-
 /* ─── Plan card markup (matches the requested design) ─────── */
 function renderPlanCard(plan) {
   const reviews  = plan.reviews || [];
@@ -95,12 +151,14 @@ function renderPlanCard(plan) {
 
   const boxes = reviews.map((r, i) => {
     const rel = relativeDayLabel(plan.createdAt, r.dueDate);
-    const isDueToday = !r.done && r.dueDate <= todayStr();
+    const today = todayStr();
+    const isOverdue  = !r.done && r.dueDate < today;
+    const isDueToday = !r.done && r.dueDate === today;
     return `
-      <div class="review-box ${r.done ? 'done' : ''} ${isDueToday ? 'due-today' : ''}" data-review-id="${r.id}">
+      <div class="review-box ${r.done ? 'done' : ''} ${isDueToday ? 'due-today' : ''} ${isOverdue ? 'overdue' : ''}" data-review-id="${r.id}">
         <button class="review-box-check" data-action="toggle-review" data-plan="${plan.id}" data-review="${r.id}"
           aria-label="تمت المراجعة ${i + 1}">${r.done ? '✓' : ''}</button>
-        <div class="review-box-num">المراجعة ${i + 1}${isDueToday ? ' 🔶' : ''}</div>
+        <div class="review-box-num">المراجعة ${i + 1}${isDueToday ? ' 🔶' : ''}${isOverdue ? ' ⚠️' : ''}</div>
         <div class="review-box-date" data-action="edit-date" data-plan="${plan.id}" data-review="${r.id}" title="اضغط لتعديل التاريخ يدوياً">
           ${formatArabicDate(r.dueDate)}
         </div>
@@ -279,6 +337,12 @@ function openPlanModal(container, existing = null) {
         placeholder="مثال: الإحصاء 1.1" value="${escHtml(existing?.title || '')}">
       <span class="form-error" id="title-error">يرجى إدخال اسم الدرس.</span>
     </div>
+    ${!isEdit ? `
+    <div class="form-group">
+      <label class="form-label">تاريخ بدء الدرس</label>
+      <input type="date" class="form-input" id="plan-start-date" value="${todayStr()}">
+      <span class="form-hint">المراجعات الخمس تُجدوَل بناءً على هذا التاريخ (1، 3، 7، 21، 40 يوماً بعده) — تقدر تغيّر أي تاريخ لاحقاً من نفس البطاقة.</span>
+    </div>` : ''}
     <div class="form-group">
       <label class="form-label">المادة المرتبطة (اختياري — لتفعيل إضافة الفلاش كاردز)</label>
       <select class="form-select" id="plan-subject">
@@ -291,10 +355,6 @@ function openPlanModal(container, existing = null) {
       <input type="text" class="form-input" id="plan-pages" dir="auto"
         placeholder="مثال: pages from 1-7" value="${escHtml(existing?.pages || '')}">
     </div>
-    ${!isEdit ? `
-    <p class="text-muted text-xs mb-4">
-      سيتم جدولة 5 مراجعات تلقائياً بعد 1، 3، 7، 21، 40 يوماً من اليوم — ويمكنك تعديل أي تاريخ لاحقاً من نفس البطاقة.
-    </p>` : ''}
     <div style="display:flex;gap:var(--s4);justify-content:flex-end;">
       <button class="btn btn-ghost" id="cancel-plan-btn">إلغاء</button>
       <button class="btn btn-primary" id="save-plan-btn">${isEdit ? '💾 حفظ' : '✅ إضافة'}</button>
@@ -328,7 +388,7 @@ function openPlanModal(container, existing = null) {
       existing.pages     = pages;
       await plansDB.save(existing);
     } else {
-      const createdAt = todayStr();
+      const createdAt = bodyEl.querySelector('#plan-start-date')?.value || todayStr();
       const plan = {
         id: uid(),
         title, category, subjectId, pages,
