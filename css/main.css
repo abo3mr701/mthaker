@@ -1264,6 +1264,17 @@ body.sidebar-collapsed .sidebar { display: none; }
 .review-box.done .review-box-check {
   background: var(--success); border-color: var(--success);
 }
+.review-box-check.locked {
+  cursor: not-allowed; opacity: .4; background: var(--border);
+}
+.plan-cards-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s4);
+  flex-wrap: wrap;
+  padding: var(--s4) var(--s5); border-radius: var(--r3);
+  margin-bottom: var(--s5); font-size: .85rem;
+}
+.plan-cards-banner.locked { background: var(--warning-soft, rgba(245,158,11,.12)); border: 1px solid rgba(245,158,11,.3); color: #b45309; }
+.plan-cards-banner.clear  { background: var(--success-soft); border: 1px solid rgba(16,185,129,.3); color: var(--success); }
 .review-box-num { font-size: .82rem; font-weight: 700; color: var(--text2); margin-bottom: var(--s2); }
 .review-box-date {
   font-size: .86rem; font-weight: 600; color: var(--text1);
