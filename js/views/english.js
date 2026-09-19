@@ -718,6 +718,18 @@ async function addWordToDeck(newWord) {
   S.wordById.set(newWord.id, newWord);
   S.cards[newWord.id] = card;
   S.seenIds.add(newWord.id);
+
+  // Bug fix: a word you add yourself should show up in "كلمات اليوم" right
+  // away — not silently disappear into "seen" limbo until some future daily
+  // batch. Push it into today's queue explicitly (creating today's queue if
+  // none exists yet), on top of whatever the automatic daily target picked.
+  if (S.queue.date !== todayStr()) {
+    S.queue = { date: todayStr(), wordIds: [] };
+  }
+  if (!S.queue.wordIds.includes(newWord.id)) {
+    S.queue.wordIds.push(newWord.id);
+  }
+
   await persistState();
 }
 

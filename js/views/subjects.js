@@ -2,11 +2,13 @@
  * subjects.js — Subject list view (create, search, edit, delete)
  */
 
-import { subjects as subjectsDB, flashcards as cardsDB } from '../db.js';
+import { subjects as subjectsDB, flashcards as cardsDB, reviewPlans as plansDB } from '../db.js';
 import {
   uid, showToast, showConfirm, debounce,
-  SUBJECT_COLORS, randomColor, arabicCount, formatDate,
+  SUBJECT_COLORS, randomColor, arabicCount, formatDate, todayStr, addDays,
 } from '../utils/helpers.js';
+
+const DEFAULT_REVIEW_OFFSETS = [1, 3, 7, 21, 40];
 
 let _allSubjects = [];
 
@@ -186,6 +188,17 @@ function openSubjectModal(container, existing = null) {
       </div>
     </div>
 
+    ${!isEdit ? `
+    <div class="form-group">
+      <label class="form-label">تاريخ بدء المادة</label>
+      <input type="date" class="form-input" id="subject-start-date" value="${todayStr()}">
+      <span class="form-hint">تُنشأ خطة مراجعة لهذه المادة تلقائياً بـ5 مراجعات (بعد 1، 3، 7، 21، 40 يوماً من هذا التاريخ) — تقدر تعدّل أي مراجعة لاحقاً من صفحة «المراجعات».</span>
+    </div>
+    <div class="form-group">
+      <label class="form-label">ملاحظات / صفحات (اختياري)</label>
+      <input type="text" class="form-input" id="subject-notes" dir="auto" placeholder="مثال: صفحات 1-20">
+    </div>` : ''}
+
     <div style="display:flex;gap:var(--s4);justify-content:flex-end;padding-top:var(--s5);">
       <button class="btn btn-ghost" id="modal-cancel-subj">إلغاء</button>
       <button class="btn btn-primary" id="modal-save-subj">
@@ -242,6 +255,31 @@ function openSubjectModal(container, existing = null) {
 
     try {
       await subjectsDB.save(subject);
+
+      // Auto-link a new subject to a scheduled review plan — no separate
+      // trip to "المراجعات" needed.
+      if (!isEdit) {
+        const startDate = bodyEl.querySelector('#subject-start-date')?.value || todayStr();
+        const notes     = bodyEl.querySelector('#subject-notes')?.value.trim() || '';
+        const plan = {
+          id: uid(),
+          title: nameVal,
+          category: 'عام',
+          subjectId: subject.id,
+          pages: notes,
+          createdAt: startDate,
+          reviews: DEFAULT_REVIEW_OFFSETS.map((offset, i) => ({
+            id: uid(),
+            n: i + 1,
+            offsetDays: offset,
+            dueDate: addDays(startDate, offset),
+            done: false,
+            completedAt: null,
+          })),
+        };
+        await plansDB.save(plan);
+      }
+
       if (isEdit) {
         const idx = _allSubjects.findIndex(s => s.id === subject.id);
         if (idx !== -1) _allSubjects[idx] = subject;
@@ -250,7 +288,7 @@ function openSubjectModal(container, existing = null) {
       }
       closeModal();
       renderUI(container, _allSubjects);
-      showToast(isEdit ? 'تم تعديل المادة' : 'تم إنشاء المادة', 'success');
+      showToast(isEdit ? 'تم تعديل المادة' : 'تم إنشاء المادة وجدولة مراجعتها تلقائياً', 'success');
     } catch (err) {
       showToast(`فشل الحفظ: ${err.message}`, 'error');
     }
