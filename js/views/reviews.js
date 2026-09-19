@@ -8,7 +8,7 @@
  */
 
 import { reviewPlans as plansDB, subjects as subjectsDB, flashcards as cardsDB, settings } from '../db.js';
-import { buildCard } from '../services/srs.js';
+import { buildCard, processReview } from '../services/srs.js';
 import { uid, showToast, showConfirm, escHtml, todayStr, addDays } from '../utils/helpers.js';
 import { refreshSubjectCardCount } from './subjects.js';
 
@@ -17,6 +17,7 @@ const DEFAULT_MAX_DAILY = 10;
 
 let _allPlans = [];
 let _allSubjects = [];
+let _allCards = [];
 let _filterMode = 'all'; // 'all' | 'today' | 'overdue'
 let _maxDaily = DEFAULT_MAX_DAILY;
 
@@ -24,9 +25,10 @@ export async function renderReviews(container) {
   container.innerHTML = `<div class="flex-center" style="padding:var(--s10)"><div class="spinner"></div></div>`;
 
   try {
-    [_allPlans, _allSubjects, _maxDaily] = await Promise.all([
+    [_allPlans, _allSubjects, _allCards, _maxDaily] = await Promise.all([
       plansDB.getAll(),
       subjectsDB.getAll(),
+      cardsDB.getAll(),
       loadMaxDaily(),
     ]);
   } catch (err) {
@@ -142,12 +144,20 @@ function emptyState() {
   `;
 }
 
+function isCardDue(c) {
+  return !c.nextReview || c.nextReview <= todayStr();
+}
+
 /* ─── Plan card markup (matches the requested design) ─────── */
 function renderPlanCard(plan) {
   const reviews  = plan.reviews || [];
   const doneCnt  = reviews.filter(r => r.done).length;
   const pct      = reviews.length ? Math.round((doneCnt / reviews.length) * 100) : 0;
   const subject  = plan.subjectId ? _allSubjects.find(s => s.id === plan.subjectId) : null;
+
+  const linkedCards  = _allCards.filter(c => c.planId === plan.id);
+  const pendingCards = linkedCards.filter(isCardDue);
+  const isLocked = pendingCards.length > 0;
 
   const boxes = reviews.map((r, i) => {
     const rel = relativeDayLabel(plan.createdAt, r.dueDate);
@@ -156,8 +166,8 @@ function renderPlanCard(plan) {
     const isDueToday = !r.done && r.dueDate === today;
     return `
       <div class="review-box ${r.done ? 'done' : ''} ${isDueToday ? 'due-today' : ''} ${isOverdue ? 'overdue' : ''}" data-review-id="${r.id}">
-        <button class="review-box-check" data-action="toggle-review" data-plan="${plan.id}" data-review="${r.id}"
-          aria-label="تمت المراجعة ${i + 1}">${r.done ? '✓' : ''}</button>
+        <button class="review-box-check ${isLocked && !r.done ? 'locked' : ''}" data-action="toggle-review" data-plan="${plan.id}" data-review="${r.id}"
+          aria-label="تمت المراجعة ${i + 1}" ${isLocked && !r.done ? 'disabled title="أنهِ بطاقات الدرس أولاً"' : ''}>${r.done ? '✓' : ''}</button>
         <div class="review-box-num">المراجعة ${i + 1}${isDueToday ? ' 🔶' : ''}${isOverdue ? ' ⚠️' : ''}</div>
         <div class="review-box-date" data-action="edit-date" data-plan="${plan.id}" data-review="${r.id}" title="اضغط لتعديل التاريخ يدوياً">
           ${formatArabicDate(r.dueDate)}
@@ -187,6 +197,17 @@ function renderPlanCard(plan) {
       <div class="review-plan-progress-bar">
         <div class="review-plan-progress-fill" style="width:${pct}%"></div>
       </div>
+
+      ${linkedCards.length > 0 ? `
+        <div class="plan-cards-banner ${isLocked ? 'locked' : 'clear'}">
+          <span>${isLocked
+            ? `📇 عندك ${pendingCards.length} بطاقة فلاش كاردز مستحقة بهذا الدرس — أنهِها قبل ما تقدر تحدّد أي مراجعة كمكتملة.`
+            : `✅ كل بطاقات هذا الدرس (${linkedCards.length}) منتهية اليوم.`}</span>
+          <button class="btn btn-sm ${isLocked ? 'btn-primary' : 'btn-secondary'}" data-action="review-cards" data-plan="${plan.id}">
+            🃏 ${isLocked ? `راجع البطاقات (${pendingCards.length})` : 'مراجعة البطاقات مرة أخرى'}
+          </button>
+        </div>
+      ` : ''}
 
       <div class="review-boxes-row">${boxes}</div>
 
@@ -251,6 +272,13 @@ function bindPlanCardEvents(container) {
       if (plan) openQuickCardModal(container, plan);
       return;
     }
+
+    const reviewCardsBtn = e.target.closest('[data-action="review-cards"]');
+    if (reviewCardsBtn) {
+      const plan = _allPlans.find(p => p.id === reviewCardsBtn.dataset.plan);
+      if (plan) openLessonCardsSession(container, plan);
+      return;
+    }
   });
 
   // Pages/notes autosave on blur
@@ -269,6 +297,17 @@ async function toggleReview(container, planId, reviewId) {
   if (!plan) return;
   const rev = (plan.reviews || []).find(r => r.id === reviewId);
   if (!rev) return;
+
+  // Defensive re-check: block completing a review while linked flashcards
+  // are still pending, even if the click somehow reached a "disabled" button.
+  if (!rev.done) {
+    const stillPending = _allCards.some(c => c.planId === plan.id && isCardDue(c));
+    if (stillPending) {
+      showToast('أنهِ بطاقات الفلاش كاردز الخاصة بهذا الدرس أولاً', 'warning');
+      return;
+    }
+  }
+
   rev.done = !rev.done;
   rev.completedAt = rev.done ? new Date().toISOString() : null;
   await plansDB.save(plan);
@@ -276,34 +315,132 @@ async function toggleReview(container, planId, reviewId) {
   showToast(rev.done ? 'تم تسجيل المراجعة ✓' : 'تم إلغاء التحديد', 'success', 1800);
 }
 
+/* ─── Mini review session for a lesson's linked flashcards ─────────
+ * Launched from the "🃏 راجع البطاقات" button on a plan card. Goes through
+ * every flashcard linked to this specific lesson (not the whole subject,
+ * and not limited by the general daily cap), using the normal SRS grading
+ * (processReview) so scheduling stays consistent with "بطاقات المراجعة".
+ * Once all of them are cleared, the plan's checkboxes unlock automatically.
+ * ──────────────────────────────────────────────────────────────── */
+function openLessonCardsSession(container, plan) {
+  const cards = _allCards.filter(c => c.planId === plan.id && isCardDue(c));
+  if (cards.length === 0) { renderUI(container); return; }
+
+  let index = 0;
+  let flipped = false;
+
+  function showCard() {
+    if (index >= cards.length) { finish(); return; }
+    const card = cards[index];
+    flipped = false;
+    container.innerHTML = `
+      <div class="page-hd">
+        <div class="page-hd-text">
+          <h2>🃏 بطاقات درس: ${escHtml(plan.title)}</h2>
+          <p>بطاقة ${index + 1} من ${cards.length}</p>
+        </div>
+        <button class="btn btn-secondary" id="lesson-session-exit">← رجوع للمراجعات</button>
+      </div>
+      <div class="study-progress-bar" style="margin-bottom:var(--s6);">
+        <div class="study-progress-fill" style="width:${Math.round((index / cards.length) * 100)}%"></div>
+      </div>
+      <div class="study-scene" id="lesson-scene" role="button" tabindex="0">
+        <div class="study-card-inner" id="lesson-card-inner">
+          <div class="study-card-face study-card-front">
+            <p class="study-card-text" dir="auto">${escHtml(card.front)}</p>
+            <p class="study-card-hint">انقر للكشف عن الإجابة</p>
+          </div>
+          <div class="study-card-face study-card-back">
+            <p class="study-card-text" dir="auto">${escHtml(card.back || '')}</p>
+            <p class="study-card-hint">كيف كانت إجابتك؟</p>
+          </div>
+        </div>
+      </div>
+      <div class="study-actions" id="lesson-actions" style="display:none;">
+        <button class="btn btn-wrong" id="lesson-btn-wrong">✗ لم أتذكر</button>
+        <button class="btn btn-correct" id="lesson-btn-correct">✓ أتذكرتها</button>
+      </div>
+    `;
+
+    const scene = container.querySelector('#lesson-scene');
+    const inner = container.querySelector('#lesson-card-inner');
+    const actions = container.querySelector('#lesson-actions');
+
+    scene.addEventListener('click', () => {
+      if (flipped) return;
+      flipped = true;
+      inner.classList.add('flipped');
+      setTimeout(() => { actions.style.display = 'flex'; }, 300);
+    });
+
+    container.querySelector('#lesson-session-exit').addEventListener('click', () => renderUI(container));
+
+    container.querySelector('#lesson-btn-correct').addEventListener('click', () => rate(card, true));
+    container.querySelector('#lesson-btn-wrong').addEventListener('click', () => rate(card, false));
+  }
+
+  async function rate(card, correct) {
+    await processReview(card, correct);
+    index += 1;
+    showCard();
+  }
+
+  async function finish() {
+    // Re-fetch cards so due/lapse state is accurate before returning to the grid
+    _allCards = await cardsDB.getAll();
+    showToast('أنهيت بطاقات هذا الدرس ✓ — تقدر تحدّد المراجعة كمكتملة الآن', 'success');
+    renderUI(container);
+  }
+
+  showCard();
+}
+
 // Manual date override — editable directly from the review box itself, at any time
 function editReviewDate(container, dateEl) {
-  if (dateEl.querySelector('input')) return; // already editing
   const planId   = dateEl.dataset.plan;
   const reviewId = dateEl.dataset.review;
   const plan     = _allPlans.find(p => p.id === planId);
   const rev      = plan && (plan.reviews || []).find(r => r.id === reviewId);
   if (!rev) return;
 
-  const original = dateEl.innerHTML;
-  dateEl.innerHTML = `<input type="date" class="review-date-input" value="${rev.dueDate}">`;
-  const input = dateEl.querySelector('input');
-  input.focus();
+  // Opens in the shared modal (plenty of room for the native calendar
+  // picker) instead of a cramped inline box — and only commits when you
+  // explicitly press "حفظ", never on a stray keystroke.
+  const backdrop = document.getElementById('modal-form');
+  const titleEl  = document.getElementById('modal-form-title');
+  const bodyEl   = document.getElementById('modal-form-body');
+  const closeBtn = document.getElementById('modal-form-close');
 
-  const commit = async () => {
-    const val = input.value;
-    if (val && val !== rev.dueDate) {
+  titleEl.textContent = `تعديل تاريخ المراجعة — ${escHtml(plan.title)}`;
+  backdrop.classList.remove('hidden');
+  bodyEl.innerHTML = `
+    <div class="form-group">
+      <label class="form-label">التاريخ الجديد</label>
+      <input type="date" class="form-input" id="rev-date-input" value="${rev.dueDate}">
+    </div>
+    <div style="display:flex;gap:var(--s4);justify-content:flex-end;">
+      <button class="btn btn-ghost" id="rev-date-cancel">إلغاء</button>
+      <button class="btn btn-primary" id="rev-date-save">💾 حفظ</button>
+    </div>
+  `;
+
+  const close = () => backdrop.classList.add('hidden');
+  closeBtn.addEventListener('click', close, { once: true });
+  bodyEl.querySelector('#rev-date-cancel').addEventListener('click', close);
+
+  setTimeout(() => bodyEl.querySelector('#rev-date-input')?.focus(), 50);
+
+  bodyEl.querySelector('#rev-date-save').addEventListener('click', async () => {
+    const val = bodyEl.querySelector('#rev-date-input').value;
+    if (!val) { showToast('اختر تاريخاً صالحاً', 'warning'); return; }
+    if (val !== rev.dueDate) {
       rev.dueDate = val;
       await plansDB.save(plan);
       showToast('تم تحديث تاريخ المراجعة', 'success', 1800);
-      renderUI(container);
-    } else {
-      dateEl.innerHTML = original;
     }
-  };
-  input.addEventListener('change', commit);
-  input.addEventListener('blur', () => { if (dateEl.querySelector('input')) dateEl.innerHTML = original; }, { once: true });
-  input.addEventListener('click', (e) => e.stopPropagation());
+    close();
+    renderUI(container);
+  });
 }
 
 async function deletePlan(container, planId) {
@@ -457,10 +594,13 @@ function openQuickCardModal(container, plan) {
     if (!back)  { bodyEl.querySelector('#qc-back-error').classList.add('visible'); return; }
 
     const card = buildCard({ front, back, subjectId: plan.subjectId, category: 'عام' });
+    card.planId = plan.id; // يربط البطاقة بهذا الدرس تحديداً (لبوابة "أنهِ البطاقات أولاً")
 
     await cardsDB.save(card);
+    _allCards.push(card);
     await refreshSubjectCardCount(plan.subjectId);
     close();
+    renderUI(container);
     showToast('تمت إضافة البطاقة إلى المادة المرتبطة بالدرس', 'success');
   });
 }
