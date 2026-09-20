@@ -10,6 +10,9 @@
  */
 
 import { dbReady, settings as settingsDB } from './db.js';
+import { watchAuthState, signOutUser, getCurrentUser } from './services/authService.js';
+import { renderAuthScreen } from './views/auth.js';
+import { showConfirm } from './utils/helpers.js';
 
 import { renderDashboard }     from './views/dashboard.js';
 import { renderSubjects }      from './views/subjects.js';
@@ -41,24 +44,52 @@ const ROUTES = [
 ];
 
 /* ─── Init ─────────────────────────────────────────────────── */
-async function init() {
-  const loaderBar = document.getElementById('loader-bar');
+let _appStarted = false;
 
-  // Step 1: Wait for IndexedDB
+async function init() {
+  // Step 1: Make sure Firebase itself is ready
   try {
     await dbReady;
   } catch (err) {
     document.getElementById('loading-screen').innerHTML = `
       <div style="text-align:center;padding:2rem;color:#dc2626;">
-        <h2>فشل تهيئة قاعدة البيانات</h2>
+        <h2>فشل تهيئة التطبيق</h2>
         <p style="margin-top:.5rem;">${err.message}</p>
-        <p style="margin-top:.5rem;opacity:.7;">تأكد من أن متصفحك يدعم IndexedDB ولم تفتح الصفحة في وضع التصفح الخاص.</p>
       </div>
     `;
     return;
   }
 
-  // Step 2: Load persisted settings
+  const loaderBar = document.getElementById('loader-bar');
+  if (loaderBar) {
+    loaderBar.style.animationDuration = '0.4s';
+    await new Promise(r => setTimeout(r, 450));
+  }
+
+  // Step 2: Gate everything on the sign-in state. This fires once
+  // immediately with the current state, then again on every login/logout.
+  watchAuthState(async (user) => {
+    if (user) {
+      document.getElementById('auth-screen')?.classList.add('hidden');
+      if (!_appStarted) {
+        _appStarted = true;
+        await startApp();
+      }
+    } else {
+      _appStarted = false;
+      document.getElementById('app')?.classList.add('hidden');
+      document.getElementById('loading-screen')?.classList.add('fade-out');
+      const authEl = document.getElementById('auth-screen');
+      if (authEl) {
+        authEl.classList.remove('hidden');
+        renderAuthScreen(authEl);
+      }
+    }
+  });
+}
+
+async function startApp() {
+  // Load persisted settings (per-account, from Firestore)
   const [apiKey, savedTheme] = await Promise.all([
     settingsDB.get('geminiApiKey'),
     settingsDB.get('theme'),
@@ -67,26 +98,33 @@ async function init() {
   if (apiKey)     window.__appState.apiKey = apiKey;
   if (savedTheme) document.body.dataset.theme = savedTheme;
 
-  // Step 3: Reveal the app
-  const loadingScreen = document.getElementById('loading-screen');
-  const appEl         = document.getElementById('app');
+  // Reveal the app
+  document.getElementById('loading-screen')?.classList.add('fade-out');
+  document.getElementById('app')?.classList.remove('hidden');
 
-  // Animate loading bar to completion
-  if (loaderBar) {
-    loaderBar.style.animationDuration = '0.4s';
-    await new Promise(r => setTimeout(r, 450));
-  }
-
-  loadingScreen.classList.add('fade-out');
-  appEl.classList.remove('hidden');
-
-  // Step 4: Wire up global UI
+  // Wire up global UI
   setupSidebar();
   setupThemeToggles();
+  setupSignOut();
 
-  // Step 5: Start router
+  // Start router
   window.addEventListener('hashchange', route);
-  route(); // Initial route
+  route();
+}
+
+function setupSignOut() {
+  const btn   = document.getElementById('sign-out-btn');
+  const label = document.getElementById('sign-out-label');
+  const user  = getCurrentUser();
+  if (label && user) {
+    const who = user.displayName || user.email || user.phoneNumber || '';
+    label.textContent = who ? `تسجيل الخروج (${who})` : 'تسجيل الخروج';
+  }
+  btn?.addEventListener('click', async () => {
+    const ok = await showConfirm('تسجيل الخروج', 'هل تريد تسجيل الخروج من حسابك على هذا الجهاز؟');
+    if (!ok) return;
+    await signOutUser();
+  });
 }
 
 /* ─── Router ───────────────────────────────────────────────── */

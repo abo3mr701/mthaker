@@ -1,13 +1,25 @@
 /**
- * db.js — IndexedDB wrapper for مذاكر
- * All persistent storage lives here. Every method returns a Promise.
+ * db.js — طبقة البيانات (الآن Firestore بدل IndexedDB المحلية).
+ *
+ * كل بيانات المستخدم محفوظة تحت users/{uid}/{اسم المجموعة}/{id} في Firestore،
+ * فتفتح نفس بياناتك من أي جهاز تسجّل دخول منه بنفس الحساب.
+ *
+ * ⚠️ الواجهة العامة (كل الدوال المُصدَّرة بالأسفل: subjects, flashcards,
+ * files, sessions, history, reviewPlans, englishCards, englishWords,
+ * settings, chatMessages, getDashboardStats) بقيت **بنفس الأسماء والشكل
+ * تمامًا** كما كانت في نسخة IndexedDB القديمة — عشان باقي ملفات التطبيق
+ * (dashboard.js, subjects.js, study.js, reviews.js, english.js...) تشتغل
+ * بدون أي تعديل عليها.
  */
 
-const DB_NAME    = 'mudhakir_db';
-const DB_VERSION = 5;
+import { auth, firestore } from './services/firebase.js';
+import {
+  collection, doc, getDoc, getDocs, setDoc, deleteDoc,
+  query, where, writeBatch,
+} from 'https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js';
 
-// Store names
-const STORES = {
+// أسماء المجموعات (نفس أسماء المخازن القديمة بالضبط)
+const COLLECTIONS = {
   SUBJECTS:  'subjects',
   CARDS:     'flashcards',
   FILES:     'files',
@@ -15,9 +27,9 @@ const STORES = {
   HISTORY:   'review_history',
   SETTINGS:  'settings',
   CHAT:      'chat_messages',
-  PLANS:     'review_plans',        // Lesson-based review checklists (Deck-independent)
-  ENG_CARDS: 'english_srs_cards',   // Per-word SRS state for the English section (Lexora-style)
-  ENG_WORDS: 'english_custom_words',// User-added English words (same shape as the built-in Oxford dataset)
+  PLANS:     'review_plans',
+  ENG_CARDS: 'english_srs_cards',
+  ENG_WORDS: 'english_custom_words',
 };
 
 /* ─── Category / Deck constants ───────────────────────────── */
@@ -26,166 +38,99 @@ export const CATEGORIES = {
   ENGLISH: 'إنجليزي',
 };
 
-let _db = null;
-
-/* ─── Open / Upgrade ──────────────────────────────────────── */
-function openDB() {
-  if (_db) return Promise.resolve(_db);
-
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-
-    req.onupgradeneeded = (e) => {
-      const db = e.target.result;
-
-      // Subjects
-      if (!db.objectStoreNames.contains(STORES.SUBJECTS)) {
-        const s = db.createObjectStore(STORES.SUBJECTS, { keyPath: 'id' });
-        s.createIndex('name',      'name',      { unique: false });
-        s.createIndex('createdAt', 'createdAt', { unique: false });
-      }
-
-      // Flashcards
-      let cardStore;
-      if (!db.objectStoreNames.contains(STORES.CARDS)) {
-        cardStore = db.createObjectStore(STORES.CARDS, { keyPath: 'id' });
-        cardStore.createIndex('subjectId',  'subjectId',  { unique: false });
-        cardStore.createIndex('nextReview', 'nextReview', { unique: false });
-        cardStore.createIndex('stage',      'stage',      { unique: false });
-      } else {
-        cardStore = e.target.transaction.objectStore(STORES.CARDS);
-      }
-      // v4: category/deck index (added for English deck + filtering)
-      if (cardStore && !cardStore.indexNames.contains('category')) {
-        cardStore.createIndex('category', 'category', { unique: false });
-      }
-
-      // Lesson review plans (independent of flashcards — see reviews.js)
-      if (!db.objectStoreNames.contains(STORES.PLANS)) {
-        const s = db.createObjectStore(STORES.PLANS, { keyPath: 'id' });
-        s.createIndex('subjectId', 'subjectId', { unique: false });
-        s.createIndex('createdAt', 'createdAt', { unique: false });
-      }
-
-      // v5: dedicated "English" section (Lexora-style) — fully independent of
-      // the general subjects/flashcards/reviews system.
-      if (!db.objectStoreNames.contains(STORES.ENG_CARDS)) {
-        db.createObjectStore(STORES.ENG_CARDS, { keyPath: 'id' }); // id = word id
-      }
-      if (!db.objectStoreNames.contains(STORES.ENG_WORDS)) {
-        db.createObjectStore(STORES.ENG_WORDS, { keyPath: 'id' });
-      }
-
-      // Files (metadata + extracted text; we don't store binary blobs)
-      if (!db.objectStoreNames.contains(STORES.FILES)) {
-        const s = db.createObjectStore(STORES.FILES, { keyPath: 'id' });
-        s.createIndex('subjectId', 'subjectId', { unique: false });
-      }
-
-      // Pomodoro sessions
-      if (!db.objectStoreNames.contains(STORES.SESSIONS)) {
-        const s = db.createObjectStore(STORES.SESSIONS, { keyPath: 'id' });
-        s.createIndex('date',      'date',      { unique: false });
-        s.createIndex('completed', 'completed', { unique: false });
-      }
-
-      // Review history
-      if (!db.objectStoreNames.contains(STORES.HISTORY)) {
-        const s = db.createObjectStore(STORES.HISTORY, { keyPath: 'id' });
-        s.createIndex('cardId',     'cardId',     { unique: false });
-        s.createIndex('reviewedAt', 'reviewedAt', { unique: false });
-      }
-
-      // Settings — simple key/value store
-      if (!db.objectStoreNames.contains(STORES.SETTINGS)) {
-        db.createObjectStore(STORES.SETTINGS, { keyPath: 'key' });
-      }
-
-      // Chat messages
-      if (!db.objectStoreNames.contains(STORES.CHAT)) {
-        const s = db.createObjectStore(STORES.CHAT, { keyPath: 'id' });
-        s.createIndex('createdAt', 'createdAt', { unique: false });
-      }
-    };
-
-    req.onsuccess = (e) => { _db = e.target.result; resolve(_db); };
-    req.onerror   = (e) => reject(new Error(`IndexedDB open failed: ${e.target.error}`));
-  });
+/* ─── Generic Firestore helpers (كلها تحت users/{uid}/...) ──── */
+function requireUid() {
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error('لازم تسجّل الدخول أولاً قبل استخدام هذي الميزة.');
+  return uid;
 }
 
-/* ─── Generic helpers ─────────────────────────────────────── */
-function tx(storeName, mode = 'readonly') {
-  return _db.transaction(storeName, mode).objectStore(storeName);
+function col(name) {
+  return collection(firestore, 'users', requireUid(), name);
 }
 
-function req2p(r) {
-  return new Promise((res, rej) => {
-    r.onsuccess = () => res(r.result);
-    r.onerror   = () => rej(r.error);
-  });
+async function getAllDocs(name) {
+  const snap = await getDocs(col(name));
+  return snap.docs.map(d => d.data());
 }
 
-function getAll(storeName) {
-  return openDB().then(() => req2p(tx(storeName).getAll()));
+async function getByIdDoc(name, id) {
+  const snap = await getDoc(doc(col(name), String(id)));
+  return snap.exists() ? snap.data() : undefined;
 }
 
-function getById(storeName, id) {
-  return openDB().then(() => req2p(tx(storeName).get(id)));
+async function putDoc(name, record) {
+  await setDoc(doc(col(name), String(record.id)), record);
+  return record;
 }
 
-function put(storeName, record) {
-  return openDB().then(() => req2p(tx(storeName, 'readwrite').put(record)));
+async function delDoc(name, id) {
+  await deleteDoc(doc(col(name), String(id)));
 }
 
-function del(storeName, id) {
-  return openDB().then(() => req2p(tx(storeName, 'readwrite').delete(id)));
+async function getByIndexDocs(name, field, value) {
+  const snap = await getDocs(query(col(name), where(field, '==', value)));
+  return snap.docs.map(d => d.data());
 }
 
-function getByIndex(storeName, indexName, value) {
-  return openDB().then(() =>
-    req2p(tx(storeName).index(indexName).getAll(value))
-  );
+async function bulkPutDocs(name, records) {
+  const c = col(name);
+  for (let i = 0; i < records.length; i += 400) {
+    const chunk = records.slice(i, i + 400);
+    const batch = writeBatch(firestore);
+    chunk.forEach(r => batch.set(doc(c, String(r.id)), r));
+    await batch.commit();
+  }
+  return records;
+}
+
+async function bulkDeleteDocs(name, ids) {
+  const c = col(name);
+  for (let i = 0; i < ids.length; i += 400) {
+    const chunk = ids.slice(i, i + 400);
+    const batch = writeBatch(firestore);
+    chunk.forEach(id => batch.delete(doc(c, String(id))));
+    await batch.commit();
+  }
 }
 
 /* ─── Subjects ────────────────────────────────────────────── */
 export const subjects = {
-  getAll:    ()         => getAll(STORES.SUBJECTS),
-  getById:   (id)       => getById(STORES.SUBJECTS, id),
-  save:      (subject)  => put(STORES.SUBJECTS, subject),
+  getAll:    ()         => getAllDocs(COLLECTIONS.SUBJECTS),
+  getById:   (id)       => getByIdDoc(COLLECTIONS.SUBJECTS, id),
+  save:      (subject)  => putDoc(COLLECTIONS.SUBJECTS, subject),
   delete:    async (id) => {
     // Cascade: delete all flashcards + files + review plans belonging to this subject
     const [cards, files, plans] = await Promise.all([
-      getByIndex(STORES.CARDS, 'subjectId', id),
-      getByIndex(STORES.FILES, 'subjectId', id),
-      getByIndex(STORES.PLANS, 'subjectId', id),
+      getByIndexDocs(COLLECTIONS.CARDS, 'subjectId', id),
+      getByIndexDocs(COLLECTIONS.FILES, 'subjectId', id),
+      getByIndexDocs(COLLECTIONS.PLANS, 'subjectId', id),
     ]);
-    const ops = [
-      ...cards.map(c => del(STORES.CARDS, c.id)),
-      ...files.map(f => del(STORES.FILES, f.id)),
-      ...plans.map(p => del(STORES.PLANS, p.id)),
-      del(STORES.SUBJECTS, id),
-    ];
-    await Promise.all(ops);
+    await Promise.all([
+      bulkDeleteDocs(COLLECTIONS.CARDS, cards.map(c => c.id)),
+      bulkDeleteDocs(COLLECTIONS.FILES, files.map(f => f.id)),
+      bulkDeleteDocs(COLLECTIONS.PLANS, plans.map(p => p.id)),
+    ]);
+    await delDoc(COLLECTIONS.SUBJECTS, id);
   },
 };
 
 /* ─── Flashcards ──────────────────────────────────────────── */
 export const flashcards = {
-  getAll:          ()            => getAll(STORES.CARDS),
-  getById:         (id)          => getById(STORES.CARDS, id),
-  getBySubject:    (subjectId)   => getByIndex(STORES.CARDS, 'subjectId', subjectId),
-  save:            (card)        => put(STORES.CARDS, card),
-  delete:          (id)          => del(STORES.CARDS, id),
+  getAll:          ()            => getAllDocs(COLLECTIONS.CARDS),
+  getById:         (id)          => getByIdDoc(COLLECTIONS.CARDS, id),
+  getBySubject:    (subjectId)   => getByIndexDocs(COLLECTIONS.CARDS, 'subjectId', subjectId),
+  save:            (card)        => putDoc(COLLECTIONS.CARDS, card),
+  delete:          (id)          => delDoc(COLLECTIONS.CARDS, id),
 
   // subjectId: null/'', or '_' (any subject) | category: null = all categories
   getDueCards: async (subjectId = null, category = null) => {
-    await openDB();
-    const today = new Date(); today.setHours(0,0,0,0);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
     const todayStr = today.toISOString().slice(0, 10);
 
     const all = (subjectId && subjectId !== '_')
-      ? await getByIndex(STORES.CARDS, 'subjectId', subjectId)
-      : await getAll(STORES.CARDS);
+      ? await getByIndexDocs(COLLECTIONS.CARDS, 'subjectId', subjectId)
+      : await getAllDocs(COLLECTIONS.CARDS);
 
     return all.filter(c =>
       (!c.nextReview || c.nextReview <= todayStr) &&
@@ -193,38 +138,33 @@ export const flashcards = {
     );
   },
 
-  getByCategory: (category) => getByIndex(STORES.CARDS, 'category', category),
+  getByCategory: (category) => getByIndexDocs(COLLECTIONS.CARDS, 'category', category),
 
-  // Distinct list of categories currently in use (always includes عام/إنجليزي)
   getCategories: async () => {
-    const all = await getAll(STORES.CARDS);
+    const all = await getAllDocs(COLLECTIONS.CARDS);
     const set = new Set(['عام', 'إنجليزي']);
     all.forEach(c => set.add(c.category || 'عام'));
     return Array.from(set);
   },
 
-  bulkSave: async (cards) => {
-    await openDB();
-    const store = tx(STORES.CARDS, 'readwrite');
-    return Promise.all(cards.map(c => req2p(store.put(c))));
-  },
+  bulkSave: (cards) => bulkPutDocs(COLLECTIONS.CARDS, cards),
 };
 
 /* ─── Files ───────────────────────────────────────────────── */
 export const files = {
-  getAll:       ()           => getAll(STORES.FILES),
-  getBySubject: (subjectId)  => getByIndex(STORES.FILES, 'subjectId', subjectId),
-  save:         (file)       => put(STORES.FILES, file),
-  delete:       (id)         => del(STORES.FILES, id),
+  getAll:       ()           => getAllDocs(COLLECTIONS.FILES),
+  getBySubject: (subjectId)  => getByIndexDocs(COLLECTIONS.FILES, 'subjectId', subjectId),
+  save:         (file)       => putDoc(COLLECTIONS.FILES, file),
+  delete:       (id)         => delDoc(COLLECTIONS.FILES, id),
 };
 
 /* ─── Pomodoro sessions ───────────────────────────────────── */
 export const sessions = {
-  getAll:     ()       => getAll(STORES.SESSIONS),
-  save:       (s)      => put(STORES.SESSIONS, s),
+  getAll:     ()       => getAllDocs(COLLECTIONS.SESSIONS),
+  save:       (s)      => putDoc(COLLECTIONS.SESSIONS, s),
 
   getStats: async () => {
-    const all = await getAll(STORES.SESSIONS);
+    const all = await getAllDocs(COLLECTIONS.SESSIONS);
     const completed = all.filter(s => s.completed);
     const totalMs   = completed.reduce((acc, s) => acc + (s.durationMs || 0), 0);
     const today     = new Date().toISOString().slice(0, 10);
@@ -239,12 +179,12 @@ export const sessions = {
 
 /* ─── Review history ──────────────────────────────────────── */
 export const history = {
-  getAll:       ()       => getAll(STORES.HISTORY),
-  getByCard:    (cardId) => getByIndex(STORES.HISTORY, 'cardId', cardId),
-  save:         (h)      => put(STORES.HISTORY, h),
+  getAll:       ()       => getAllDocs(COLLECTIONS.HISTORY),
+  getByCard:    (cardId) => getByIndexDocs(COLLECTIONS.HISTORY, 'cardId', cardId),
+  save:         (h)      => putDoc(COLLECTIONS.HISTORY, h),
 
   getRecent: async (limit = 20) => {
-    const all = await getAll(STORES.HISTORY);
+    const all = await getAllDocs(COLLECTIONS.HISTORY);
     return all
       .sort((a, b) => b.reviewedAt.localeCompare(a.reviewedAt))
       .slice(0, limit);
@@ -262,11 +202,11 @@ export const history = {
  * }
  * ────────────────────────────────────────────────────────── */
 export const reviewPlans = {
-  getAll:       ()          => getAll(STORES.PLANS),
-  getById:      (id)        => getById(STORES.PLANS, id),
-  getBySubject: (subjectId) => getByIndex(STORES.PLANS, 'subjectId', subjectId),
-  save:         (plan)      => put(STORES.PLANS, plan),
-  delete:       (id)        => del(STORES.PLANS, id),
+  getAll:       ()          => getAllDocs(COLLECTIONS.PLANS),
+  getById:      (id)        => getByIdDoc(COLLECTIONS.PLANS, id),
+  getBySubject: (subjectId) => getByIndexDocs(COLLECTIONS.PLANS, 'subjectId', subjectId),
+  save:         (plan)      => putDoc(COLLECTIONS.PLANS, plan),
+  delete:       (id)        => delDoc(COLLECTIONS.PLANS, id),
 };
 
 /* ─── English section (Lexora-style) — fully independent store ──
@@ -275,43 +215,39 @@ export const reviewPlans = {
  * built-in Oxford dataset in js/data/oxfordWords.js).
  * ────────────────────────────────────────────────────────────── */
 export const englishCards = {
-  getAll:  ()     => getAll(STORES.ENG_CARDS),
-  getById: (id)   => getById(STORES.ENG_CARDS, id),
-  save:    (card) => put(STORES.ENG_CARDS, card),
-  bulkSave: async (cards) => {
-    await openDB();
-    const store = tx(STORES.ENG_CARDS, 'readwrite');
-    return Promise.all(cards.map(c => req2p(store.put(c))));
-  },
+  getAll:  ()     => getAllDocs(COLLECTIONS.ENG_CARDS),
+  getById: (id)   => getByIdDoc(COLLECTIONS.ENG_CARDS, id),
+  save:    (card) => putDoc(COLLECTIONS.ENG_CARDS, card),
+  bulkSave: (cards) => bulkPutDocs(COLLECTIONS.ENG_CARDS, cards),
 };
 
 export const englishWords = {
-  getAll:  ()      => getAll(STORES.ENG_WORDS),
-  save:    (word)  => put(STORES.ENG_WORDS, word),
-  delete:  (id)    => del(STORES.ENG_WORDS, id),
+  getAll:  ()      => getAllDocs(COLLECTIONS.ENG_WORDS),
+  save:    (word)  => putDoc(COLLECTIONS.ENG_WORDS, word),
+  delete:  (id)    => delDoc(COLLECTIONS.ENG_WORDS, id),
 };
 
 /* ─── Settings ────────────────────────────────────────────── */
 export const settings = {
   get: async (key) => {
-    const rec = await getById(STORES.SETTINGS, key);
-    return rec ? rec.value : undefined;
+    const snap = await getDoc(doc(col(COLLECTIONS.SETTINGS), String(key)));
+    return snap.exists() ? snap.data().value : undefined;
   },
-  set: (key, value) => put(STORES.SETTINGS, { key, value }),
+  set: (key, value) => setDoc(doc(col(COLLECTIONS.SETTINGS), String(key)), { key, value }),
 
   getAll: async () => {
-    const rows = await getAll(STORES.SETTINGS);
+    const rows = await getAllDocs(COLLECTIONS.SETTINGS);
     return Object.fromEntries(rows.map(r => [r.key, r.value]));
   },
 };
 
 /* ─── Chat messages ───────────────────────────────────────── */
 export const chatMessages = {
-  getAll:   ()    => getAll(STORES.CHAT),
-  save:     (m)   => put(STORES.CHAT, m),
+  getAll:   ()    => getAllDocs(COLLECTIONS.CHAT),
+  save:     (m)   => putDoc(COLLECTIONS.CHAT, m),
   clearAll: async () => {
-    await openDB();
-    return req2p(tx(STORES.CHAT, 'readwrite').clear());
+    const all = await getAllDocs(COLLECTIONS.CHAT);
+    await bulkDeleteDocs(COLLECTIONS.CHAT, all.map(m => m.id));
   },
 };
 
@@ -325,7 +261,7 @@ export async function getDashboardStats() {
     reviewPlans.getAll(),
   ]);
   const today = new Date().toISOString().slice(0, 10);
-  const plansDueToday  = plans.filter(p => (p.reviews || []).some(r => !r.done && r.dueDate <= today)).length;
+  const plansDueToday = plans.filter(p => (p.reviews || []).some(r => !r.done && r.dueDate <= today)).length;
   return {
     subjectCount:  allSubjects.length,
     cardCount:     allCards.length,
@@ -336,5 +272,15 @@ export async function getDashboardStats() {
   };
 }
 
-// Initialise on first import
-export const dbReady = openDB();
+// Firebase App يتهيّأ بشكل متزامن عند الاستيراد — ما يحتاج انتظار فعلي هنا،
+// أُبقي هذا التصدير فقط عشان app.js القديم اللي ينتظره ما ينكسر.
+export const dbReady = Promise.resolve();
+
+/* ─── Wipe everything for the current account ─────────────── */
+export async function clearAllUserData() {
+  const names = Object.values(COLLECTIONS);
+  for (const name of names) {
+    const all = await getAllDocs(name);
+    await bulkDeleteDocs(name, all.map(r => r.id ?? r.key));
+  }
+}
