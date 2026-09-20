@@ -1455,6 +1455,39 @@ body.sidebar-collapsed .sidebar { display: none; }
 }
 .import-check-row:hover { background: var(--surface-alt); }
 .import-check-row input { accent-color: var(--primary); width: 16px; height: 16px; }
+
+/* ── Auth screen (login / signup) ───────────────────────────── */
+.auth-screen {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  background: var(--bg) var(--pattern);
+  padding: var(--s6);
+}
+.auth-card {
+  width: 100%; max-width: 420px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r5); padding: var(--s8);
+  box-shadow: var(--shadow-lg);
+}
+.auth-brand { display: flex; align-items: center; justify-content: center; gap: var(--s3); margin-bottom: var(--s3); }
+.auth-brand-name { font-size: 1.4rem; font-weight: 800; color: var(--text1); }
+.auth-tagline { text-align: center; color: var(--text3); font-size: .85rem; margin-bottom: var(--s7); }
+
+.auth-tabs { display: flex; gap: var(--s2); margin-bottom: var(--s6); background: var(--input-bg); border-radius: var(--r-full); padding: var(--s1); }
+.auth-tab { flex: 1; border: none; background: none; padding: var(--s3); border-radius: var(--r-full); font-size: .85rem; font-weight: 700; color: var(--text3); cursor: pointer; font-family: var(--font); }
+.auth-tab.active { background: var(--primary); color: #fff; }
+
+.auth-form { display: flex; flex-direction: column; gap: var(--s2); margin-bottom: var(--s2); }
+.auth-form.hidden { display: none; }
+.auth-link-btn { border: none; background: none; color: var(--primary); font-size: .8rem; cursor: pointer; text-align: start; padding: var(--s1) 0; font-family: var(--font); }
+
+.auth-divider { display: flex; align-items: center; gap: var(--s4); margin: var(--s6) 0; color: var(--text3); font-size: .78rem; }
+.auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+.auth-error {
+  background: var(--danger-soft); color: var(--danger); border: 1px solid rgba(239,68,68,.3);
+  border-radius: var(--r3); padding: var(--s3) var(--s4); font-size: .82rem; margin-bottom: var(--s5);
+}
+
 .hidden { display: none !important; }
 /* ── 36. Reduced motion (kept last) ─────────────────────────── */
 @media (prefers-reduced-motion:reduce) {
