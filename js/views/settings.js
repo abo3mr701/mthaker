@@ -9,6 +9,7 @@ import {
   files as filesDB_exp,
   sessions as sessionsDB_exp,
   history as historyDB_exp,
+  clearAllUserData,
 } from '../db.js';
 import { validateApiKey } from '../services/gemini.js';
 import { getMaxDailyReviews, setMaxDailyReviews } from '../services/srs.js';
@@ -204,14 +205,7 @@ function bindSettingsEvents(container, currentApiKey) {
     if (!ok2) return;
 
     try {
-      const dbs = await indexedDB.databases?.();
-      if (dbs) {
-        for (const d of dbs) {
-          if (d.name === 'mudhakir_db') indexedDB.deleteDatabase(d.name);
-        }
-      } else {
-        indexedDB.deleteDatabase('mudhakir_db');
-      }
+      await clearAllUserData();
       showToast('تم حذف جميع البيانات. سيتم إعادة تحميل الصفحة…', 'info', 3000);
       setTimeout(() => window.location.reload(), 3000);
     } catch (err) {
