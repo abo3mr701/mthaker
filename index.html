@@ -29,6 +29,9 @@
     </div>
   </div>
 
+  <!-- ── Auth Screen (login/signup) — filled in by js/views/auth.js ── -->
+  <div id="auth-screen" class="auth-screen hidden"></div>
+
   <!-- ── App Shell ─────────────────────────────────────── -->
   <div id="app" class="app hidden">
 
@@ -70,6 +73,9 @@
         <a href="#settings" class="nav-link" data-view="settings">
           <span class="nav-icon">&#x2699;</span><span>الإعدادات</span>
         </a>
+        <button class="nav-link" id="sign-out-btn" style="width:100%;border:none;background:none;cursor:pointer;text-align:start;font-family:inherit;">
+          <span class="nav-icon">&#x1F6AA;</span><span id="sign-out-label">تسجيل الخروج</span>
+        </button>
         <button class="theme-btn" id="theme-toggle" aria-label="تبديل المظهر" title="تبديل المظهر">
           <span class="theme-icon-light">&#x2600;</span>
           <span class="theme-icon-dark">&#x1F319;</span>
