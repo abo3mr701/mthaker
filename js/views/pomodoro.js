@@ -4,36 +4,10 @@ import { auth } from '../services/firebase.js';
 import { uid, showToast, formatTimer, escHtml } from '../utils/helpers.js';
 import { localStudyDay } from '../services/reviewPlanSchedule.js';
 import { sessionTotals, addStudySpan, studyDuration } from '../services/studyTime.js';
-import { cityScene, landmarkProgress } from './focusCity.js';
+import { cityScene, landmarkProgress, CITY_FRAME } from './focusCity.js';
+import { CITY_WORLDS } from './cityWorlds.js';
 
 const MODES = { pomodoro: 'بومودورو', countdown: 'عد تنازلي', stopwatch: 'عداد مفتوح' };
-const CITY = [
-  [5, '🌱', 'مشتل الحي', 'هنا تبدأ حديقة المدينة.'],
-  [15, '🌻', 'ميدان دوّار الشمس', 'أزهار صفراء على مدخل الحي.'],
-  [25, '🏡', 'بيت البدايات', 'أول بيت يفتح أبوابه في المدينة.'],
-  [40, '🌵', 'حديقة الصبّار', 'نباتات تتحمل أيام الصيف الطويلة.'],
-  [60, '📚', 'مكتبة المدينة', 'مكان هادئ لقراءة فصل جديد.'],
-  [85, '🌴', 'ممر النخيل', 'طريق مظلل يصل الساحة بالحديقة.'],
-  [120, '⛲', 'ساحة النافورة', 'ملتقى سكان المدينة.'],
-  [160, '🌸', 'بستان الكرز', 'أزهار وردية تحيط بالممر.'],
-  [210, '🏫', 'مدرسة الحي', 'صفوف تفتح في الصباح.'],
-  [270, '🌿', 'حديقة الأعشاب', 'ريحان ونعناع على أطراف الساحة.'],
-  [340, '🌉', 'جسر الوادي', 'معبر يصل ضفتي المدينة.'],
-  [420, '🎋', 'غابة الخيزران', 'ركن أخضر على الضفة الهادئة.'],
-  [510, '🏛️', 'متحف المعرفة', 'قاعة تحفظ اكتشافات المدينة.'],
-  [610, '🍋', 'بستان الليمون', 'أشجار مثمرة قرب السوق.'],
-  [730, '🏪', 'السوق الصغير', 'دكاكين على جانبي الشارع.'],
-  [870, '🌲', 'منتزه الصنوبر', 'أشجار عالية حول مسار المشي.'],
-  [1030, '🚉', 'محطة القطار', 'الطريق إلى أحياء أبعد.'],
-  [1210, '🪷', 'بركة اللوتس', 'أزهار تطفو فوق الماء.'],
-  [1410, '🗼', 'برج المدينة', 'من هنا تشوف الأحياء كلها.'],
-  [1650, '🌳', 'شجرة الساحة الكبرى', 'ظل واسع يجمع أهل المدينة.'],
-  [1950, '🏟️', 'ملعب المدينة', 'مكان للحركة بعد المذاكرة.'],
-  [2300, '🪻', 'حديقة الخزامى', 'ممرات بنفسجية قرب المنتزه.'],
-  [2700, '🏰', 'قلعة المعرفة', 'معلم يطل على المدينة.'],
-  [3200, '🌆', 'حي الأفق', 'حي جديد تضيئه إنجازاتك.'],
-];
-
 let owner;
 let timer;
 let records = [];
@@ -41,6 +15,9 @@ let view;
 let ticker;
 let selected = 0;
 let cityTurn = 0;
+let worldId = 'riyadh';
+let cameraBox = [...CITY_FRAME];
+let cityLocations = [];
 let audio;
 
 function newTimer() {
@@ -56,6 +33,8 @@ export function resetStudyTimer() {
   view = null;
   selected = 0;
   cityTurn = 0;
+  worldId = 'riyadh';
+  cameraBox = [...CITY_FRAME];
 }
 
 function limit(state) {
@@ -199,14 +178,24 @@ export async function renderPomodoro(container) {
     <section class="card focus-city" aria-labelledby="focus-city-heading">
       <div class="focus-city-header">
         <div><h3 id="focus-city-heading">مدينة مذاكر</h3>
-          <p class="text-muted">معالم المدينة تكبر على ثلاث مراحل حسب وقت مذاكرتك المحفوظ.</p></div>
+          <p id="city-description" class="text-muted"></p></div>
         <span id="focus-city-count" class="category-badge"></span>
       </div>
-      <div class="city-controls" aria-label="اتجاه الكاميرا">
+      <div class="city-pickers">
+        <label>المدينة <select id="city-world" class="form-select">${Object.entries(CITY_WORLDS).map(([id, world]) =>
+          `<option value="${id}">${world.name}</option>`).join('')}</select></label>
+        <label>المعلم <select id="city-landmark" class="form-select"></select></label>
+      </div>
+      <div class="city-controls" aria-label="التحكم بالخريطة">
+        <button type="button" class="btn btn-primary btn-sm" id="city-visit">اقترب من المعلم</button>
+        <button type="button" class="btn btn-secondary btn-sm" id="city-in" aria-label="تقريب">＋</button>
+        <button type="button" class="btn btn-secondary btn-sm" id="city-out" aria-label="إبعاد">−</button>
         <button type="button" class="btn btn-secondary btn-sm" id="city-left" aria-label="دوّر المدينة لليسار">↶ تدوير</button>
         <button type="button" class="btn btn-secondary btn-sm" id="city-right" aria-label="دوّر المدينة لليمين">تدوير ↷</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="city-overview">نظرة عامة</button>
       </div>
       <div id="focus-map" class="focus-map"></div>
+      <p class="text-muted text-xs city-help">اسحب الخريطة للتنقل عند التقريب. المجسّم مستوحى من المعالم الحقيقية بمواقع تقريبية. <a id="city-source" target="_blank" rel="noopener noreferrer">مصدر المعالم ↗</a></p>
       <div id="focus-place" class="focus-place" aria-live="polite"></div>
     </section>`;
 
@@ -260,25 +249,7 @@ export async function renderPomodoro(container) {
       updateControls();
     }
   });
-  function selectLot(event) {
-    const tile = event.target.closest('[data-tile]');
-    if (!tile) return;
-    selected = Number(tile.dataset.tile);
-    paintCity(sessionTotals(records).all / 60000);
-    get('focus-map').querySelector(`[data-tile="${selected}"]`)?.focus({ preventScroll: true });
-  }
-  get('focus-map').addEventListener('click', selectLot);
-  get('focus-map').addEventListener('keydown', event => {
-    if (!event.target.closest('[data-tile]') || !['Enter', ' '].includes(event.key)) return;
-    event.preventDefault();
-    selectLot(event);
-  });
-  [['city-left', -1], ['city-right', 1]].forEach(([id, delta]) => {
-    get(id).addEventListener('click', () => {
-      cityTurn = (cityTurn + delta + 4) % 4;
-      paintCity(sessionTotals(records).all / 60000);
-    });
-  });
+  bindCity(get);
   updateControls();
   paintProgress();
 }
@@ -319,12 +290,99 @@ function paintProgress() {
   paintCity(minutes);
 }
 
+function bindCity(get) {
+  const map = get('focus-map');
+  const redraw = () => paintCity(sessionTotals(records).all / 60000);
+  const changeLot = index => { selected = index; redraw(); };
+  get('city-world').addEventListener('change', event => {
+    worldId = event.target.value;
+    cityTurn = 0;
+    cameraBox = [...CITY_FRAME];
+    changeLot(0);
+  });
+  get('city-landmark').addEventListener('change', event => changeLot(Number(event.target.value)));
+  get('city-visit').addEventListener('click', () => zoomCity(4, cityLocations[selected]));
+  get('city-in').addEventListener('click', () => zoomCity(CITY_FRAME[2] / cameraBox[2] * 1.45));
+  get('city-out').addEventListener('click', () => zoomCity(CITY_FRAME[2] / cameraBox[2] / 1.45));
+  get('city-overview').addEventListener('click', () => zoomCity(1));
+  [['city-left', -1], ['city-right', 1]].forEach(([id, delta]) => {
+    get(id).addEventListener('click', () => {
+      const zoom = CITY_FRAME[2] / cameraBox[2];
+      cityTurn = (cityTurn + delta + 4) % 4;
+      redraw();
+      zoomCity(zoom, cityLocations[selected]);
+    });
+  });
+  let drag = null;
+  let suppressClick = false;
+  map.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || cameraBox[2] === CITY_FRAME[2] || drag) return;
+    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, box: [...cameraBox] };
+    suppressClick = false;
+  });
+  map.addEventListener('pointermove', event => {
+    if (!drag || event.pointerId !== drag.id) return;
+    const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
+    if (!suppressClick && Math.hypot(dx, dy) < 5) return;
+    suppressClick = true;
+    map.setPointerCapture(event.pointerId);
+    const scale = drag.box[2] / map.clientWidth;
+    cameraBox[0] = drag.box[0] - dx * scale;
+    cameraBox[1] = drag.box[1] - dy * scale;
+    applyCamera();
+  });
+  const endDrag = event => { if (drag?.id === event.pointerId) drag = null; };
+  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture', 'pointerleave']) map.addEventListener(type, endDrag);
+  map.addEventListener('click', event => {
+    if (suppressClick) { suppressClick = false; return; }
+    const tile = event.target.closest('[data-tile]');
+    if (tile) changeLot(Number(tile.dataset.tile));
+  });
+  map.addEventListener('keydown', event => {
+    const tile = event.target.closest('[data-tile]');
+    if (!tile || !['Enter', ' '].includes(event.key)) return;
+    event.preventDefault();
+    changeLot(Number(tile.dataset.tile));
+    map.querySelector(`[data-tile="${selected}"]`)?.focus({ preventScroll: true });
+  });
+}
+
+function zoomCity(zoom, center = [cameraBox[0] + cameraBox[2] / 2, cameraBox[1] + cameraBox[3] / 2]) {
+  zoom = Math.max(1, Math.min(7, zoom));
+  const width = CITY_FRAME[2] / zoom, height = CITY_FRAME[3] / zoom;
+  cameraBox = [center[0] - width / 2, center[1] - height / 2, width, height];
+  applyCamera();
+}
+
+function applyCamera() {
+  const map = view.querySelector('#focus-map');
+  const [,,width,height] = cameraBox;
+  cameraBox[0] = Math.max(0, Math.min(CITY_FRAME[2] - width, cameraBox[0]));
+  cameraBox[1] = Math.max(0, Math.min(CITY_FRAME[3] - height, cameraBox[1]));
+  map.querySelector('svg').setAttribute('viewBox', cameraBox.join(' '));
+  map.classList.toggle('is-zoomed', width < CITY_FRAME[2]);
+}
+
 function paintCity(minutes) {
-  const unlocked = CITY.filter(([goal]) => minutes >= goal).length;
-  view.querySelector('#focus-city-count').textContent = `${unlocked} / ${CITY.length} معلم`;
-  view.querySelector('#focus-map').innerHTML = cityScene(CITY, minutes, selected, cityTurn, escHtml);
-  const [, icon, label, detail] = CITY[selected];
-  const progress = landmarkProgress(CITY, selected, minutes);
+  const world = CITY_WORLDS[worldId];
+  const landmarks = world.landmarks;
+  const unlocked = landmarks.filter(([goal]) => minutes >= goal).length;
+  view.querySelector('#city-world').value = worldId;
+  view.querySelector('#city-description').textContent = world.description;
+  view.querySelector('#city-source').href = world.source;
+  view.querySelector('#focus-city-count').textContent = `${unlocked} / ${landmarks.length} معلم`;
+  const picker = view.querySelector('#city-landmark');
+  if (picker.dataset.world !== worldId) {
+    picker.innerHTML = landmarks.map(([, , label], index) => `<option value="${index}">${escHtml(label)}</option>`).join('');
+    picker.dataset.world = worldId;
+  }
+  picker.value = String(selected);
+  const { svg, locations } = cityScene(world, minutes, selected, cityTurn, escHtml);
+  cityLocations = locations;
+  view.querySelector('#focus-map').innerHTML = svg;
+  applyCamera();
+  const [, icon, label, detail] = landmarks[selected];
+  const progress = landmarkProgress(landmarks, selected, minutes);
   const description = progress.unlocked
     ? `المرحلة ${progress.stage} من 3 · ${detail}`
     : `باقي ${progress.remaining} دقيقة مذاكرة لفتحه.`;

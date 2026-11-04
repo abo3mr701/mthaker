@@ -1,7 +1,3 @@
-const COLUMNS = 6;
-const ROWS = 4;
-const STEP = 1.12;
-
 export function landmarkProgress(city, index, minutes) {
   const goal = city[index][0];
   const previous = city[index - 1]?.[0] ?? 0;
@@ -20,7 +16,7 @@ function camera(turn) {
   return ([x, y, z]) => {
     const u = x * cos - y * sin;
     const v = x * sin + y * cos;
-    return [380 + (u - v) * 61, 248 + (u + v) * 33 - z * 76, u + v];
+    return [500 + (u - v) * 36, 336 + (u + v) * 20 - z * 69, u + v];
   };
 }
 
@@ -48,78 +44,165 @@ function solid(project, x, y, width, length, bottom, top, colors, taper = 1) {
     + face(project, roof, colors[0]).html;
 }
 
-const PARKS = new Set([0, 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21]);
-const GREEN = ['#a9e8a0', '#66ab78', '#4e9468'];
-const TRUNK = ['#b48b59', '#966443', '#734d37'];
-const FOLIAGE = [
-  ['#79e4a6', '#42b779', '#2d8e66'],
-  ['#ffe995', '#f5bf57', '#db8c3c'],
-  ['#91e7c3', '#52ba96', '#2d9078'],
-  ['#f9b3dc', '#d976b5', '#ab5594'],
-  ['#bac3fc', '#8f97df', '#6570be'],
-];
-const BUILDINGS = [
-  ['#f6d6a6', '#d5a774', '#ae7d58'],
-  ['#e9e2ff', '#bba9ee', '#8979ba'],
-  ['#a8e9f4', '#7dbdce', '#568fa7'],
-  ['#fbc1b0', '#e48e80', '#bc665f'],
-];
-const ROOF = ['#ffaf8e', '#e67b65', '#bc524c'];
 
-function park(project, x, y, index, stage) {
-  const colors = FOLIAGE[[0, 1, 0, 2, 0, 2, 0, 3, 0, 2, 0, 0, 0, 1, 0, 2, 0, 3, 0, 0, 0, 4][index]];
-  if (index === 17) {
-    return solid(project, x, y, .69, .61, .08, .12, ['#7addf0', '#459fb8', '#347e9b'])
-      + solid(project, x, y, .18 + stage * .09, .18 + stage * .09, .12, .16 + stage * .045, colors, .65);
+export const CITY_FRAME = [0, 0, 1000, 650];
+const OUTLINE = [[-7.4,-3],[-6.3,-5.4],[-3.8,-5.9],[-1,-5.4],[2.1,-6],[5.9,-5.3],[7.4,-3],[7,0],[7.5,2.4],[5.9,5.1],[2.5,5.7],[-.5,5.3],[-3.2,5.8],[-5.9,4.8],[-7.4,2.2],[-6.9,0]];
+const PALETTES = {
+  desert: { land:['#e7c895','#c59d6f','#a77b53'], road:'#b5a084', water:'#639e9c', green:['#8fb77c','#66935f','#4b7956'], block:['#f6dfbe','#cea887','#b78e6e'], ridge:['#e6b981','#c79969','#af7e54'] },
+  fjord: { land:['#a8c9a1','#719d83','#557e6f'], road:'#9aa6a1', water:'#5498b5', green:['#88b582','#568d67','#3e725b'], block:['#d8dfd4','#a5bcb3','#809f97'], ridge:['#9ec098','#779e84','#578b74'] },
+  alpine: { land:['#b8ce96','#81a77c','#668e66'], road:'#a7ad92', water:'#65a8cb', green:['#89bd7e','#609b62','#488057'], block:['#e8d9be','#c4b092','#ab9478'], ridge:['#aecb9c','#87a785','#698e75'] },
+};
+const GLASS = ['#cceaf2','#729eae','#517688'];
+const CLAY = ['#f6d7a0','#c39365','#a67553'];
+const TIMBER = ['#c89b6c','#996748','#794937'];
+const TRUNK = ['#aa835a','#956846','#694b37'];
+const ROOFS = [
+  ['#ec926b','#c96a53','#ae543e'], ['#f2c573','#d9a45a','#bb8246'],
+  ['#aec3df','#829ebc','#687d9d'], ['#e8a3a0','#c97876','#a95959'],
+];
+const PLANTS = new Set(['palm','pine','garden']);
+const offset = (n, a) => ((Math.sin(n * 191.37 + a * 21.7) * 4871.23) % 1 + 1) % 1;
+const flatten = (project, points, color, z = 0) => face(project, points.map(([x,y]) => [x,y,z]), color).html;
+
+function terrain(project, style, palette) {
+  const top = OUTLINE.map(([x,y]) => [x,y,0]);
+  const sides = top.map((point, index) => {
+    const next = top[(index + 1) % top.length];
+    return face(project, [point, next, [next[0],next[1],-.52], [point[0],point[1],-.52]], palette.land[index % 2 + 1]);
+  }).sort((a,b) => a.depth-b.depth).map(item => item.html).join('');
+  const water = style === 'desert'
+    ? [[-6.5,-4.1],[-5.45,-2.4],[-5.8,-.7],[-6.55,1.4],[-5.6,3.7],[-4.7,4.75],[-5.02,4.9],[-6.0,3.95],[-6.93,1.42],[-6.2,-.7],[-5.8,-2.3],[-6.8,-3.9]]
+    : [[-7.1,-2.9],[-6.1,-5],[-3.9,-5.45],[-2.8,-3.9],[-1.75,-2.7],[-1.2,-1.1],[-1.2,.05],[-2.1,1.1],[-2.9,2.4],[-2,4.75],[-3.35,5.37],[-5.6,4.35],[-6.95,2.1],[-6.55,0]];
+  return sides + face(project,top,palette.land[0]).html + flatten(project,water,palette.water,.012);
+}
+
+function street(project, points, color, width) {
+  const coords = points.map(([x,y]) => project([x,y,.018]).slice(0,2).join(',')).join(' ');
+  return `<polyline points="${coords}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"/>`;
+}
+
+function tree(project,x,y,size,kind,colors,z=0) {
+  const trunk = solid(project,x,y,.045,.045,z,z+size*.75,TRUNK);
+  if (kind === 'palm') {
+    const fronds = [[-.24,0],[.24,0],[0,-.24],[0,.24]].map(([dx,dy]) =>
+      face(project,[[x-dy*.25,y+dx*.25,z+size],[x+dx,y+dy,z+size*.83],[x+dy*.25,y-dx*.25,z+size],[x,y,z+size*1.08]],colors[1]).html).join('');
+    return trunk + fronds;
   }
-  const locations = [[0, 0], [-.24, .21], [.24, -.18]].slice(0, stage);
-  locations.sort((a, b) => project([x + a[0], y + a[1], 0])[2] - project([x + b[0], y + b[1], 0])[2]);
-  return locations.map(([dx, dy]) => {
-    const height = dx === 0 ? .24 + stage * .16 : .31;
-    const width = dx === 0 ? .22 + stage * .085 : .24;
-    return solid(project, x + dx, y + dy, .085, .085, .08, height * .65, TRUNK)
-      + solid(project, x + dx, y + dy, width, width, height * .43, height, colors, index === 15 ? .12 : .55);
+  return trunk + solid(project,x,y,size*.65,size*.65,z+size*.34,z+size,colors,kind==='pine'?.06:.5);
+}
+
+function landmarkModel(project,x,y,kind,stage,palette) {
+  const height = [.22,.62,1.25,2.12][stage];
+  if (PLANTS.has(kind)) {
+    const count = stage === 0 ? 1 : stage * 3;
+    return Array.from({length:count},(_,i) => {
+      const dx = (i%3-1)*.32, dy=(Math.floor(i/3)-1)*.31;
+      return tree(project,x+dx,y+dy,.16+stage*.12+offset(i,7)*.14,kind,palette.green,.035);
+    }).join('');
+  }
+  if (kind === 'kingdom') {
+    const body = solid(project,x,y,.58,.45,.04,height*.73,GLASS,.84);
+    if (stage < 3) return body + solid(project,x,y,.34,.26,height*.73,height,GLASS,.87);
+    const legs = [-.205,.205].map(dx => solid(project,x+dx,y,.15,.34,height*.71,height,GLASS,.75)).join('');
+    return body + legs + solid(project,x,y,.5,.33,height-.075,height,GLASS);
+  }
+  if (kind === 'faisaliah') {
+    const spire = solid(project,x,y,.71,.62,.05,height,GLASS,.075);
+    const [cx,cy] = project([x,y,height*.82]);
+    return spire + (stage===3 ? `<circle cx="${cx}" cy="${cy}" r="6" fill="#edbe64"/>` : '');
+  }
+  if (kind === 'bridge') {
+    return solid(project,x,y,1.2,.27,.09,.16+stage*.035,TIMBER)
+      + solid(project,x-.28,y,.24,.25,.04,.27+stage*.13,CLAY,.88);
+  }
+  const count = Math.max(1,stage + 1);
+  return Array.from({length:count},(_,i) => {
+    const dx = (i%2-.5)*.58, dy=(Math.floor(i/2)-.5)*.48;
+    const z = kind==='financial' ? height*(.54+offset(i,2)*.45) : .14 + stage*.14 + offset(i,8)*.15;
+    const colors = kind==='financial'?GLASS:kind==='fort'?CLAY:palette.block;
+    const body = solid(project,x+dx,y+dy,.42,.36,.025,z,colors,kind==='financial'?.68:1);
+    return body + (kind==='harbor' ? solid(project,x+dx,y+dy,.48,.42,z,z+.19,ROOFS[i%4],.15) : '');
   }).join('');
 }
 
-function building(project, x, y, index, stage) {
-  const colors = BUILDINGS[index % BUILDINGS.length];
-  const height = (index === 18 || index === 23 ? .34 : .19) + stage * .16;
-  if (index === 6) {
-    return solid(project, x, y, .68, .63, .08, .18, ['#cbdef2', '#9caec8', '#7186a6'], .88)
-      + solid(project, x, y, .46, .43, .18, .21, ['#7addf0', '#459fb8', '#347e9b'])
-      + solid(project, x, y, .12, .12, .21, .28 + stage * .11, ['#b6f0ff', '#70d3e6', '#4ca5bc'], .58);
-  }
-  const width = index === 18 ? .37 : .55 + stage * .052;
-  const length = index === 16 ? .79 : .49 + stage * .06;
-  const body = solid(project, x, y, width, length, .08, height, colors);
-  const roof = solid(project, x, y, width + .07, length + .07, height, height + (index === 2 || index === 22 ? .23 : .09), index === 2 ? ROOF : colors, index === 2 ? .18 : .82);
-  const upper = stage >= 2 ? solid(project, x, y, width * .43, length * .43, height + .09, height + .09 + (stage - 1) * .1, BUILDINGS[(index + 1) % 4], .8) : '';
-  return body + roof + upper;
+function activity(project,x,y,planting,phase) {
+  const [cx,cy] = project([x+.47,y+.48,.045]);
+  const [ax,ay] = project([x-.46,y+.36,.04]);
+  const worker = (px,py,second) => `<g transform="translate(${px} ${py})" aria-hidden="true">
+    <g class="city-worker ${second?'city-worker-alt':''}">
+      <ellipse cx="0" cy="0" rx="4" ry="1.6" fill="#354c47" opacity=".4"/>
+      <path d="M-2 0l1-5m3 5-1-5" stroke="#304656" stroke-width="1.5" stroke-linecap="round"/>
+      <path d="M0-5v-6m0 2 4 3" stroke="${planting?'#14685d':'#ff773c'}" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="0" cy="-12" r="2.4" fill="#e5ad7c"/>
+      <path d="M-3-13h6" stroke="${planting?'#f9dc92':'#ffc845'}" stroke-width="2" stroke-linecap="round"/>
+    </g></g>`;
+  const tool = planting
+    ? `<g transform="translate(${cx+8} ${cy})"><g class="city-seed"><path d="M0 0v-8m0 5-4-3m4 1 4-4" stroke="#257247" fill="none" stroke-width="1.5" stroke-linecap="round"/></g></g>`
+    : `<g transform="translate(${ax-8} ${ay})" fill="none" stroke="#dc9b22" stroke-width="2" aria-hidden="true">
+      <path d="M0 0v-${26+phase*7}l21 4m-21-4-8 6m0-1h8"/>
+      <path class="city-crane-hook" d="M15-${22+phase*7}v12l-3 2m-4 0h8" stroke="#755e3f"/>
+    </g>`;
+  return tool + worker(cx,cy,false) + worker(ax,ay,true);
 }
 
-export function cityScene(city, minutes, selected, turn, escape) {
+export function cityScene(world, minutes, selected, turn, escape) {
   const project = camera(turn);
-  const ground = solid(project, 0, 0, COLUMNS * STEP + .15, ROWS * STEP + .15, -.23, -.025,
-    ['#74969b', '#4b687c', '#385463']);
-  const lots = city.map(([goal, icon, label], index) => {
-    const x = (index % COLUMNS - (COLUMNS - 1) / 2) * STEP;
-    const y = (Math.floor(index / COLUMNS) - (ROWS - 1) / 2) * STEP;
-    const { unlocked, stage } = landmarkProgress(city, index, minutes);
-    const parkLot = PARKS.has(index);
-    const colors = unlocked ? parkLot ? GREEN : ['#c2d8db', '#96b4b7', '#799ba0']
-      : ['#9cb3b8', '#78969e', '#637f8b'];
-    const isSelected = selected === index;
-    const marker = project([x, y, .11]);
-    const base = solid(project, x, y, .96, .96, -.01, .08, isSelected ? ['#f5d481', '#d5a950', '#aa7b38'] : colors);
-    const model = unlocked ? (parkLot ? park(project, x, y, index, stage) : building(project, x, y, index, stage))
-      : solid(project, x, y, .16, .16, .08, .17, ['#c3d2cd', '#93a9a9', '#6e888e'], .65);
-    return { depth: marker[2], html: `<g class="city-lot" role="button" tabindex="0" data-tile="${index}"
-      aria-pressed="${isSelected}" aria-label="${escape(label)}${unlocked ? '' : '، مقفل'}">
-      <title>${escape(label)}</title>${base}${model}</g>` };
+  const palette = PALETTES[world.terrain];
+  const dry = world.terrain === 'desert';
+  const landmarks = world.landmarks;
+  const ground = terrain(project,world.terrain,palette);
+  const lanes = [-3.1,-.55,2.55,4].map(y =>
+    street(project,[[dry?-5:-.6,y],[.7,y+.12],[3.5,y-.1],[6,y+.16]],palette.road,6));
+  lanes.push(...[-2.8,-.8,1.15,3.45,5.6].filter(x=>dry||x>=-.8).map(x =>
+    street(project,[[x,-4.8],[x+.12,-2],[x-.12,1.9],[x+.2,4.7]],palette.road,x===1.15?10:5)));
+  if (dry) lanes.push(street(project,[[1.15,-4.8],[1.27,-2],[1.03,1.9],[1.35,4.7]],'#f6dfbc',1.2));
+  const objects = [];
+  const add = (x,y,html) => objects.push({depth:project([x,y,0])[2],html});
+  for (let row=0;row<13;row++) {
+    for (let col=0;col<16;col++) {
+      const i=row*16+col;
+      const x=-5.35+col*.71+offset(i,3)*.22;
+      const y=-4.65+row*.75+offset(i,4)*.22;
+      if ((!dry&&x<-.9)||Math.abs(x)>6.5||Math.abs(y)>4.8||
+          landmarks.some(([, , , , lx,ly])=>Math.hypot(lx-x,ly-y)<.96) ||
+          [-3.1,-.55,2.55,4].some(value=>Math.abs(y-value)<.16) ||
+          [-2.8,-.8,1.15,3.45,5.6].some(value=>Math.abs(x-value)<.17)) continue;
+      if (!dry&&(x>4.25||y<-3.9)) {
+        const tall=.22+offset(i,9)*.35;
+        add(x,y,tree(project,x,y,tall,'pine',palette.green));
+      } else if (offset(i,6)>(dry?.13:.42)) {
+        const high=.08+offset(i,1)*.32+(dry&&Math.abs(x-1)<1.8?.16:0);
+        const roof = !dry ? solid(project,x,y,.39,.33,high,high+.13,ROOFS[i%4],.18) : '';
+        add(x,y,solid(project,x,y,.35+offset(i,2)*.1,.32,.02,high,palette.block)+roof);
+      } else {
+        add(x,y,tree(project,x,y,.23+offset(i,9)*.18,dry?'palm':'pine',palette.green));
+      }
+    }
+  }
+  const ridges = dry ? [[-5,-4.4,.42],[-6.6,2.5,.43],[-4.5,4.75,.38]]
+    : [[4.65,-4.45,.95],[5.7,-3.6,1.05],[5.7,3.5,.87],[5.2,4.25,1.12]];
+  for (const [x,y,height] of ridges) add(x,y,solid(project,x,y,1.7,1.35,.005,height,palette.ridge,.12));
+  const next = landmarks.findIndex(([goal])=>minutes<goal);
+  const locations = [];
+  landmarks.forEach(([, , label, , x,y,kind],index) => {
+    const progress = landmarkProgress(landmarks,index,minutes);
+    const isSelected=index===selected;
+    const plant=PLANTS.has(kind);
+    const isActive=index===next || (progress.unlocked && progress.stage<3);
+    const stage = progress.stage;
+    const model = progress.unlocked || isActive ? landmarkModel(project,x,y,kind,stage,palette) : '';
+    const lot = solid(project,x,y,1.13,1.05,.015,.045,isSelected?['#ffe491','#d5a950','#aa7b38']:plant?palette.green:palette.block);
+    const [cx,cy] = project([x,y,0]);
+    const tower = kind === 'kingdom' || kind === 'faisaliah' || kind === 'financial';
+    locations[index] = [cx, cy - (tower ? [5, 16, 37, 62][stage] : 9)];
+    add(x,y,`<g class="city-lot" role="button" tabindex="0" data-tile="${index}" aria-pressed="${isSelected}"
+      aria-label="${escape(label)}"><title>${escape(label)}</title>${lot}${model}
+      ${isActive ? activity(project,x,y,plant,stage) : ''}
+      <circle class="city-pin" cx="${cx}" cy="${cy+18}" r="${isSelected?6:4}" fill="${isSelected?'#ffe187':'#fff1ca'}" stroke="#394d5b" stroke-width="1.4"/></g>`);
   });
-  return `<svg class="city-scene" viewBox="0 0 760 505" role="group" aria-label="خريطة مدينة مذاكر ثلاثية الأبعاد">
-    <ellipse cx="380" cy="425" rx="272" ry="42" fill="#203451" opacity=".16"/>
-    ${ground}${lots.sort((a, b) => a.depth - b.depth).map(lot => lot.html).join('')}
+  const svg = `<svg class="city-scene" viewBox="0 0 1000 650" role="group" aria-label="مجسّم ${escape(world.name)}">
+    <ellipse cx="502" cy="556" rx="335" ry="49" fill="#203451" opacity=".17"/>
+    ${ground}${lanes.join('')}${objects.sort((a,b)=>a.depth-b.depth).map(item=>item.html).join('')}
   </svg>`;
+  return { svg, locations };
 }
