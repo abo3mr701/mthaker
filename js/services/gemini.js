@@ -1,5 +1,5 @@
 /**
- * gemini.js — Google Gemini 1.5 Flash API service
+ * gemini.js — Google Gemini API service with automatic model discovery
  *
  * Responsibilities:
  *  - Validate an API key with a live call
@@ -9,21 +9,122 @@
  */
 
 const GEMINI_BASE  = 'https://generativelanguage.googleapis.com/v1beta';
-const FLASH_MODEL  = 'gemini-2.5-flash';
-const TEXT_ENDPOINT = (key) =>
-  `${GEMINI_BASE}/models/${FLASH_MODEL}:generateContent?key=${key}`;
+const MODEL_CACHE_MS = 5 * 60 * 1000;
+let modelCache = null;
+
+function apiError(message, kind, status = 0) {
+  return Object.assign(new Error(message), { kind, status });
+}
+
+function normalizeKey(apiKey) {
+  const key = typeof apiKey === 'string' ? apiKey.trim() : '';
+  if (!key) throw apiError('لم يتم إدخال مفتاح Gemini API. الرجاء الذهاب إلى الإعدادات.', 'missing_key');
+  return key;
+}
+
+async function requestGemini(apiKey, path, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  try {
+    const res = await fetch(`${GEMINI_BASE}/${path}`, {
+      ...options,
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      signal: controller.signal,
+    });
+    let json;
+    try {
+      json = await res.json();
+    } catch (err) {
+      if (controller.signal.aborted) throw err;
+      throw apiError(`تعذّر قراءة رد Google (HTTP ${res.status}). حاول مرة أخرى.`, 'response', res.status);
+    }
+    if (res.ok) return json;
+
+    const error = json?.error;
+    const invalidKey = res.status === 401 || (Array.isArray(error?.details) && error.details.some(detail =>
+      ['API_KEY_INVALID', 'API_KEY_EXPIRED'].includes(detail?.reason)));
+    const kind = invalidKey ? 'invalid_key'
+      : res.status === 403 ? 'permission'
+      : res.status === 429 ? 'quota'
+      : res.status === 404 ? 'not_found'
+      : res.status >= 500 ? 'service' : 'request';
+    const messages = {
+      invalid_key: 'مفتاح Gemini غير صالح أو منتهي الصلاحية. راجع المفتاح في Google AI Studio.',
+      permission: 'Google رفضت الوصول. راجع صلاحيات المفتاح وقيود الموقع وحالة المشروع؛ هذا لا يعني أن المفتاح غير صالح.',
+      quota: 'تم بلوغ حد الاستخدام أو الحصة. راجع الحصة والفوترة في Google AI Studio، ثم أعد المحاولة.',
+      not_found: 'الموديل المطلوب لم يعد متاحاً لهذا الطلب.',
+      service: 'خدمة Gemini غير متاحة مؤقتاً. حاول مرة أخرى لاحقاً.',
+      request: 'تعذّر تنفيذ طلب Gemini. راجع تفاصيل الخطأ.',
+    };
+    const detail = String(error?.message || '').split(apiKey).join('[API KEY]');
+    throw apiError(`${messages[kind]}${detail ? ` (${detail})` : ''}`, kind, res.status);
+  } catch (err) {
+    if (err.kind) throw err;
+    if (controller.signal.aborted) {
+      throw apiError('انتهت مهلة الاتصال بـ Gemini. حاول مرة أخرى.', 'timeout');
+    }
+    throw apiError('تعذّر الاتصال بـ Gemini. تحقق من اتصال الإنترنت وإعدادات المتصفح.', 'network');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Only general-purpose Gemini text/image models suit chat, flashcards and OCR.
+function modelRank(model) {
+  const id = model.name.slice('models/'.length);
+  const family = /flash-lite/.test(id) ? 1 : /flash/.test(id) ? 0 : 2;
+  const version = id.match(/^gemini-(\d+)(?:\.(\d+))?/);
+  return [/(?:preview|exp|experimental)/.test(id) ? 1 : 0,
+    family, -(Number(version?.[1] || 0) * 100 + Number(version?.[2] || 0))];
+}
+
+async function discoverModel(apiKey, refresh = false) {
+  if (!refresh && modelCache?.key === apiKey && modelCache.expires > Date.now()) {
+    return modelCache.model;
+  }
+  const models = [];
+  let pageToken = '';
+  const seenTokens = new Set();
+  do {
+    const query = new URLSearchParams({ pageSize: '1000' });
+    if (pageToken) query.set('pageToken', pageToken);
+    const json = await requestGemini(apiKey, `models?${query}`);
+    models.push(...(Array.isArray(json.models) ? json.models : []));
+    pageToken = json.nextPageToken || '';
+    if (pageToken && seenTokens.has(pageToken)) {
+      throw apiError('تعذّر إكمال قائمة موديلات Gemini. أعد المحاولة.', 'response');
+    }
+    seenTokens.add(pageToken);
+  } while (pageToken);
+
+  const available = models.filter(model =>
+    typeof model.name === 'string' &&
+    !/(?:image|tts|audio|live|native|embedding|robotics|computer-use)/i.test(model.name) &&
+    /^models\/gemini-(?:\d+(?:\.\d+)?-(?:flash(?:-lite)?|pro)|flash(?:-lite)?|pro)(?:-(?:latest|\d+|preview(?:-[\w-]+)?|exp(?:erimental)?(?:-[\w-]+)?))?$/.test(model.name) &&
+    model.supportedGenerationMethods?.includes('generateContent'));
+  available.sort((a, b) => {
+    const ar = modelRank(a), br = modelRank(b);
+    for (let i = 0; i < ar.length; i++) if (ar[i] !== br[i]) return ar[i] - br[i];
+    return a.name.localeCompare(b.name);
+  });
+  if (!available.length) {
+    throw apiError('لم يظهر موديل Gemini مناسب للمحادثة وإنشاء البطاقات. راجع الموديلات المتاحة لمشروعك في Google AI Studio.', 'no_model');
+  }
+  modelCache = { key: apiKey, model: available[0], expires: Date.now() + MODEL_CACHE_MS };
+  return modelCache.model;
+}
 
 /* ─── Internal: raw request ──────────────────────────────── */
 async function callGemini(apiKey, contents, generationConfig = {}) {
-  if (!apiKey) throw new Error('لم يتم إدخال مفتاح Gemini API. الرجاء الذهاب إلى الإعدادات.');
+  apiKey = normalizeKey(apiKey);
+  let model = await discoverModel(apiKey);
 
   const body = {
     contents,
     generationConfig: {
       temperature:    0.4,
-      topK:           32,
       topP:           0.95,
-      maxOutputTokens: 8192,
+      maxOutputTokens: Math.min(8192, model.outputTokenLimit || 8192),
       ...generationConfig,
     },
     safetySettings: [
@@ -34,22 +135,18 @@ async function callGemini(apiKey, contents, generationConfig = {}) {
     ],
   };
 
-  let res;
+  const generate = () => requestGemini(apiKey, `${model.name}:generateContent`, {
+    method:  'POST',
+    body:    JSON.stringify(body),
+  });
+  let json;
   try {
-    res = await fetch(TEXT_ENDPOINT(apiKey), {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(body),
-    });
-  } catch (netErr) {
-    throw new Error(`خطأ في الشبكة: ${netErr.message}`);
-  }
-
-  const json = await res.json();
-
-  if (!res.ok) {
-    const msg = json?.error?.message || `خطأ HTTP ${res.status}`;
-    throw new Error(`Gemini API: ${msg}`);
+    json = await generate();
+  } catch (err) {
+    if (err.kind !== 'not_found') throw err;
+    // Refresh once if a cached model has been removed. Never retry quota errors.
+    model = await discoverModel(apiKey, true);
+    json = await generate();
   }
 
   // Extract text content from response
@@ -60,19 +157,17 @@ async function callGemini(apiKey, contents, generationConfig = {}) {
     throw new Error('استجابة Gemini فارغة أو غير متوقعة.');
   }
 
-  return parts.map(p => p.text || '').join('');
+  return parts.filter(p => !p.thought).map(p => p.text || '').join('');
 }
 
 /* ─── Validate API key ────────────────────────────────────── */
 export async function validateApiKey(apiKey) {
   try {
-    await callGemini(apiKey, [{
-      role:  'user',
-      parts: [{ text: 'مرحباً' }],
-    }]);
-    return { valid: true };
+    const model = await discoverModel(normalizeKey(apiKey), true);
+    // Listing models checks access without spending generation tokens.
+    return { valid: true, model: model.name.slice('models/'.length) };
   } catch (err) {
-    return { valid: false, error: err.message };
+    return { valid: false, kind: err.kind, error: err.message };
   }
 }
 

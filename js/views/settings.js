@@ -145,18 +145,23 @@ function bindSettingsEvents(container, currentApiKey) {
     setApiStatus(container, 'checking');
     validateBtn.disabled = true;
 
-    const result = await validateApiKey(key);
-
-    validateBtn.disabled = false;
-    if (result.valid) {
-      await settingsDB.set('geminiApiKey', key);
-      // Update app-level state
-      if (window.__appState) window.__appState.apiKey = key;
-      setApiStatus(container, 'valid');
-      showToast('✅ تم التحقق من المفتاح وحفظه', 'success');
-    } else {
-      setApiStatus(container, 'invalid', result.error);
-      showToast(`فشل التحقق: ${result.error}`, 'error', 7000);
+    try {
+      const result = await validateApiKey(key);
+      if (result.valid) {
+        await settingsDB.set('geminiApiKey', key);
+        // Update app-level state only after storage succeeds.
+        if (window.__appState) window.__appState.apiKey = key;
+        setApiStatus(container, 'valid', result.model);
+        showToast('✅ تم التحقق من المفتاح وحفظه', 'success');
+      } else {
+        setApiStatus(container, result.kind === 'invalid_key' ? 'invalid' : 'error', result.error);
+        showToast(`فشل التحقق: ${result.error}`, 'error', 7000);
+      }
+    } catch {
+      setApiStatus(container, 'error', 'تعذّر حفظ المفتاح. تحقق من الاتصال وحاول مرة أخرى.');
+      showToast('تعذّر حفظ المفتاح', 'error');
+    } finally {
+      validateBtn.disabled = false;
     }
   });
 
@@ -214,7 +219,7 @@ function bindSettingsEvents(container, currentApiKey) {
   });
 
   // Show current key status on load
-  if (currentApiKey) setApiStatus(container, 'valid');
+  if (currentApiKey) setApiStatus(container, 'saved');
 }
 
 function setApiStatus(container, state, errorMsg = '') {
@@ -222,11 +227,13 @@ function setApiStatus(container, state, errorMsg = '') {
   if (!el) return;
   if (!state) { el.innerHTML = ''; return; }
   const labels = {
-    valid:    '✅ المفتاح صالح ومحفوظ',
+    valid:    `✅ تم التحقق من الوصول وحفظ المفتاح${errorMsg ? ' — الموديل: ' + errorMsg : ''}. الحصة تُفحص عند الاستخدام.`,
+    saved:    '🔑 يوجد مفتاح محفوظ. اضغط «التحقق والحفظ» لفحص الوصول والموديل المتاح.',
     invalid:  `❌ مفتاح غير صالح${errorMsg ? ': ' + errorMsg : ''}`,
-    checking: '⏳ جاري التحقق…',
+    error:    `⚠️ تعذّر التحقق${errorMsg ? ': ' + errorMsg : ''}`,
+    checking: '⏳ جاري التحقق وجلب الموديلات المتاحة…',
   };
-  el.innerHTML = `<span class="api-status ${state}">${labels[state]}</span>`;
+  el.innerHTML = `<span class="api-status ${state}" role="status">${escHtml(labels[state] || '')}</span>`;
 }
 
 /* ─── Export all data as JSON download ───────────────────── */

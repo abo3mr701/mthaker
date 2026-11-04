@@ -764,6 +764,7 @@ body.sidebar-collapsed .sidebar { display: none; }
 .api-status.valid   { background:var(--success-soft); color:var(--success); }
 .api-status.invalid { background:var(--danger-soft);  color:var(--danger);  }
 .api-status.checking { background:var(--gold-soft);   color:var(--gold);    }
+.api-status.error, .api-status.saved { background:var(--gold-soft); color:var(--gold); }
 
 /* SRS Intervals editor */
 .srs-intervals-list { display:flex; flex-direction:column; gap:var(--s4); margin-bottom:var(--s5); }
