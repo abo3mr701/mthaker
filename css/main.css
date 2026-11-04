@@ -1549,3 +1549,39 @@ body.sidebar-collapsed .sidebar { display: none; }
     transition-duration:.01ms !important;
   }
 }
+.eng-writing-practice {
+  max-width: 700px;
+  margin: var(--s5) auto;
+  display: grid;
+  gap: var(--s4);
+  justify-items: start;
+}
+.eng-writing-fields {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: var(--s4);
+}
+.eng-writing-fields label { display: grid; align-content: start; gap: var(--s2); }
+.dashboard-motivation {
+  margin-block: var(--s6);
+  padding: clamp(20px, 4vw, 40px);
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: var(--r5);
+  background: var(--surface);
+}
+.dashboard-motivation-message {
+  margin-block: var(--s3);
+  font-family: Amiri, 'Noto Naskh Arabic', 'Traditional Arabic', serif;
+  font-size: clamp(1.7rem, 3.5vw, 2.8rem);
+  font-weight: 700;
+  line-height: 1.65;
+  white-space: pre-line;
+}
+.dashboard-motivation-verse {
+  margin-block: var(--s4) var(--s2);
+  font-family: Amiri, 'Noto Naskh Arabic', 'Traditional Arabic', serif;
+  font-size: clamp(1.4rem, 2.6vw, 1.9rem);
+  color: var(--primary);
+}

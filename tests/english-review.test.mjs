@@ -27,7 +27,7 @@ test('seen words excluded from new words are still returned as due reviews', () 
   assert.deepEqual(ids(queue.buildReviewQueue(words, {old:card}, [], new Date(card.dueDate))), ['old']);
 });
 
-for(const [rating, days] of [['hard',1], ['good',1], ['easy',3], ['again',0]]) {
+for(const [rating, days] of [['hard',1], ['good',2], ['easy',3], ['again',0]]) {
   test(`${rating} returns at its scheduled time`, () => {
     const card = srs.applyRating(srs.createNewCard('old'), rating, start);
     assert.equal(card.interval, days);
@@ -74,7 +74,8 @@ test('subsequent easy reviews use the grown interval and return again', () => {
 });
 
 class Element {
-  constructor() {this.style={};this.listeners={};this.dataset={};this.children=new Map();this.disabled=false;}
+  constructor() {this.style={};this.listeners={};this.dataset={};this.children=new Map();this.disabled=false;this.value='';}
+  reportValidity() {return Boolean(this.value);}
   set innerHTML(value) {this.html=value;this.children=new Map();}
   get innerHTML() {return this.html || '';}
   querySelector(selector) {
@@ -106,21 +107,43 @@ async function viewFixture({failSave=false}={}) {
   };
   globalThis.__englishDeps={...srs,...queue,escHtml:s=>String(s).replaceAll('<','&lt;'),todayStr:()=>new Date().toISOString().slice(0,10),
     showToast:message=>toasts.push(message),cardsDB:{save:async()=>{saves++;await gate;if(failSave)throw Error('offline');}},
-    settings:{set:async()=>{}},oxfordWords:words};
-  const shim='const {createNewCard,applyRating,isDue,forecastLabel,RATINGS,generateDailyQueue,buildReviewQueue,escHtml,todayStr,showToast,cardsDB,settings,oxfordWords}=globalThis.__englishDeps;\n';
+    settings:{set:async()=>{}},oxfordWords:words,englishMessageForDay:()=>'',localStudyDay:()=> '2026-11-04'};
+  const shim='const {createNewCard,applyRating,isDue,forecastLabel,RATINGS,generateDailyQueue,buildReviewQueue,escHtml,todayStr,showToast,cardsDB,settings,oxfordWords,englishMessageForDay,localStudyDay}=globalThis.__englishDeps;\n';
   const hooks='\nexport function setState(state){S=state;} export {renderTodayTab};';
   const view=await import('data:text/javascript;base64,'+Buffer.from(shim+viewSource+hooks).toString('base64')+'#'+sequence++);
   view.setState(state);
   const container=new Element(), el=container.querySelector('#eng-content');
   view.renderTodayTab(container,el);
+  el.querySelector('#eng-answer-translation').value='يعود';
+  el.querySelector('#eng-answer-word').value='return';
   return {view,state,container,el,release,toasts,saves:()=>saves};
 }
 
 test('actual English view shows an old due word even with an empty daily queue',async()=>{
   const {el}=await viewFixture();
   assert.match(el.innerHTML,/return/);
-  assert.match(el.innerHTML,/سهل<span>3 يوم/);
+  assert.match(el.innerHTML,/سهل<span>3 أيام/);
   assert.ok(!el.innerHTML.includes('~10'));
+});
+
+test('rating requires a translation and a word, including when only spaces are entered',async()=>{
+  const f=await viewFixture();
+  const button=f.el.querySelector('#eng-rate-grid').querySelector('easy');
+  for(const field of ['#eng-answer-translation','#eng-answer-word']) {
+    const input=f.el.querySelector(field);
+    input.value='   ';
+    await button.listeners.click({stopPropagation(){}});
+    assert.equal(f.saves(),0);
+    input.value='answer';
+  }
+});
+
+test('rating intervals remain ordered for existing cards',()=>{
+  for(const interval of [0,1,2,8,30,150]) {
+    const card={...srs.createNewCard('old'),interval,reps:interval?1:0,ease:1.3};
+    const intervals=['hard','good','easy'].map(rating=>srs.applyRating(card,rating,start).interval);
+    assert.ok(intervals[0]<intervals[1] && intervals[1]<intervals[2]);
+  }
 });
 
 test('rating the current word does not skip the next due word',async()=>{

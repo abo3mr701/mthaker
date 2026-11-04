@@ -10,6 +10,8 @@
 import { oxfordWords, legacyOxfordWords } from '../data/oxfordWords.js';
 import { englishCards as cardsDB, englishWords as customWordsDB, settings } from '../db.js';
 import { createNewCard, applyRating, isDue, forecastLabel, RATINGS } from '../services/englishSrs.js';
+import { englishMessageForDay } from '../data/dailyMotivation.js';
+import { localStudyDay } from '../services/reviewPlanSchedule.js';
 import { generateDailyQueue, buildReviewQueue } from '../services/englishQueue.js';
 import { mergeVocabulary, normalizeWord, activeWordKeys } from '../services/englishVocabulary.js';
 import { renderEnglishCatalog, creditHtml } from './englishCatalog.js';
@@ -150,7 +152,7 @@ function paint(container) {
     <div class="page-hd">
       <div class="page-hd-text">
         <h2>الإنجليزية</h2>
-        <p>Oxford 5000 · نظام تكرار متباعد بأسلوب Anki — 🔥 ${S.stats.streak} يوم متتالي</p>
+        <p lang="en" dir="ltr">${englishMessageForDay(localStudyDay())}</p>
       </div>
     </div>
 
@@ -339,13 +341,13 @@ function renderTodayTab(container, el) {
       <div class="study-progress-fill" style="width:${Math.round((index / total) * 100)}%"></div>
     </div>
 
-    <div class="study-scene eng-study-scene" id="eng-scene" role="button" tabindex="0" aria-label="انقر لقلب البطاقة">
+    <div class="study-scene eng-study-scene" id="eng-scene" role="button" tabindex="0" aria-label="اقلب البطاقة بعد كتابة إجابتك">
       <div class="study-card-inner" id="eng-card-inner">
         <div class="study-card-face study-card-front">
           <span class="stage-badge level-badge level-${(word.level || 'A1').toLowerCase()}">${word.level || 'A1'} · ${escHtml(word.pos || '—')}</span>
           <p class="study-card-text" dir="ltr">${escHtml(word.word)}</p>
           <button class="btn btn-sm btn-secondary" id="eng-speak-front" type="button">🔊 نطق</button>
-          <p class="study-card-hint">انقر للكشف عن الترجمة والأمثلة</p>
+          <p class="study-card-hint">اكتب إجابتك تحت البطاقة</p>
         </div>
         <div class="study-card-face study-card-back">
           <p class="study-card-text" dir="rtl">${escHtml(word.ar || '—')}</p>
@@ -358,12 +360,26 @@ function renderTodayTab(container, el) {
       </div>
     </div>
 
+    <form class="eng-writing-practice" id="eng-writing-practice">
+      <div class="eng-writing-fields">
+        <label>اكتب الترجمة <span class="text-muted">(مطلوب)</span>
+          <input class="form-input" id="eng-answer-translation" required autocomplete="off" dir="rtl">
+        </label>
+        <label>اكتب الكلمة بالإنجليزي <span class="text-muted">(مطلوب)</span>
+          <input class="form-input" id="eng-answer-word" required autocomplete="off" dir="ltr">
+        </label>
+        <label>استخدم الكلمة في جملة <span class="text-muted">(اختياري)</span>
+          <textarea class="form-input" rows="2" dir="ltr"></textarea>
+        </label>
+      </div>
+      <button type="submit" class="btn btn-secondary">اكشف الإجابة</button>
+    </form>
     <div class="rate-grid" id="eng-rate-grid" style="display:none;">
       ${RATING_BUTTONS.map(b => `
         <button class="btn ${b.cls}" data-rating="${b.key}">${b.label}<span>${b.hint || forecastLabel(applyRating(currentCard, b.key).interval)}</span></button>
       `).join('')}
     </div>
-    <p class="text-muted text-xs text-center mt-4">انقر البطاقة لقلبها، ثم اختر تقييمك</p>
+    <p class="text-muted text-xs text-center mt-4">اكتب إجابتك، ثم قارنها بالبطاقة واختر تقييمك.</p>
   `;
 
   bindFlashcard(container, el, word);
@@ -387,7 +403,19 @@ function bindFlashcard(container, el, word) {
   const scene    = el.querySelector('#eng-scene');
   const inner    = el.querySelector('#eng-card-inner');
   const rateGrid = el.querySelector('#eng-rate-grid');
+  const practice = el.querySelector('#eng-writing-practice');
+  const requiredAnswers = ['#eng-answer-translation', '#eng-answer-word'].map(id => el.querySelector(id));
   let flipped = false;
+
+  function practiceComplete() {
+    for (const input of requiredAnswers) {
+      if (input.value.trim()) continue;
+      input.value = '';
+      input.reportValidity();
+      return false;
+    }
+    return true;
+  }
 
   function speak(text) {
     if (!('speechSynthesis' in window) || !text) return;
@@ -399,17 +427,23 @@ function bindFlashcard(container, el, word) {
   }
 
   function flip() {
+    if (!flipped && !practiceComplete()) return;
     flipped = !flipped;
     inner.classList.toggle('flipped', flipped);
     rateGrid.style.display = flipped ? 'grid' : 'none';
   }
 
+  practice.addEventListener('submit', event => {
+    event.preventDefault();
+    if (!flipped) flip();
+  });
+
   scene.addEventListener('click', (e) => {
-    if (e.target.closest('button')) return;
+    if (e.target.closest('button, a')) return;
     flip();
   });
   scene.addEventListener('keydown', (e) => {
-    if ((e.key === ' ' || e.key === 'Enter') && !e.target.closest('button')) { e.preventDefault(); flip(); }
+    if ((e.key === ' ' || e.key === 'Enter') && !e.target.closest('button, a')) { e.preventDefault(); flip(); }
   });
 
   el.querySelector('#eng-speak-front')?.addEventListener('click', (e) => { e.stopPropagation(); speak(word.word); });
@@ -423,7 +457,7 @@ function bindFlashcard(container, el, word) {
   ratingButtons.forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (saving) return;
+      if (saving || !practiceComplete()) return;
       saving = true;
       ratingButtons.forEach(button => { button.disabled = true; });
       const current = S.cards[word.id] || createNewCard(word.id);

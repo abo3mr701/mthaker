@@ -3,8 +3,10 @@
  */
 
 import { getDashboardStats, history as historyDB, flashcards as cardsDB, reviewPlans as plansDB, englishCards as engCardsDB, settings } from '../db.js';
-import { formatDate, timeAgo, arabicCount, escHtml, todayStr } from '../utils/helpers.js';
+import { formatDate, timeAgo, arabicCount, escHtml } from '../utils/helpers.js';
 import { isDue as engIsDue } from '../services/englishSrs.js';
+import { arabicMessageForDay } from '../data/dailyMotivation.js';
+import { localStudyDay, scheduleReviewPlans } from '../services/reviewPlanSchedule.js';
 
 export async function renderDashboard(container) {
   container.innerHTML = `<div class="flex-center" style="padding:var(--s10)"><div class="spinner"></div></div>`;
@@ -24,6 +26,7 @@ export async function renderDashboard(container) {
 
   const today    = new Date().toLocaleDateString('ar-SA', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
   const greeting = getGreeting();
+  const message = arabicMessageForDay(localStudyDay());
 
   container.innerHTML = `
     <!-- Welcome banner -->
@@ -45,6 +48,14 @@ export async function renderDashboard(container) {
         </div>
       </div>
     </div>
+
+    <section class="dashboard-motivation" aria-label="رسالة اليوم">
+      <p class="text-muted">رسالة اليوم</p>
+      <p class="dashboard-motivation-message">${escHtml(message.text)}</p>
+      ${message.source ? `<a href="${escHtml(message.source)}" target="_blank" rel="noopener noreferrer">${escHtml(message.author)} · مصدر البيت</a>` : ''}
+      <p class="dashboard-motivation-verse">﴿فَإِنَّ مَعَ الْعُسْرِ يُسْرًا﴾</p>
+      <a href="https://quran.com/94/5" target="_blank" rel="noopener noreferrer">سورة الشرح، الآية ٥</a>
+    </section>
 
     <!-- Stats grid -->
     <div class="stat-grid">
@@ -73,7 +84,7 @@ export async function renderDashboard(container) {
         <div class="stat-icon stat-icon-blue">🗓️</div>
         <div>
           <div class="stat-val">${stats.planCount}</div>
-          <div class="stat-lbl">خطة مراجعة دروس${stats.plansDueToday ? ` (${stats.plansDueToday} اليوم)` : ''}</div>
+          <div class="stat-lbl">خطة مراجعة دروس${duePlans.length ? ` (${duePlans.length} اليوم)` : ''}</div>
         </div>
       </div>
       <div class="stat-card" id="dash-english-card" style="cursor:pointer">
@@ -203,11 +214,12 @@ function getGreeting() {
 
 /* ─── Lessons (خطط المراجعة) due today — surfaced right on the dashboard ── */
 async function getPlansDueToday() {
-  const plans = await plansDB.getAll();
-  const today = todayStr();
+  const today = localStudyDay();
+  const [saved, limit] = await Promise.all([plansDB.getAll(), settings.get('reviewsMaxDaily')]);
+  const { plans } = scheduleReviewPlans(saved, today, limit);
   const due = [];
   for (const p of plans) {
-    const idx = (p.reviews || []).findIndex(r => !r.done && r.dueDate <= today);
+    const idx = (p.reviews || []).findIndex(r => !r.done && r.dueDate === today);
     if (idx !== -1) due.push({ ...p, dueReviewIndex: idx + 1 });
   }
   return due;

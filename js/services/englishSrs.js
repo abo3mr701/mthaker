@@ -38,6 +38,8 @@ export function createNewCard(wordId) {
 export function applyRating(card, rating, at = new Date()) {
   const next = { ...card };
   const now  = new Date(at);
+  const hardInterval = next.reps === 0 ? 1 : Math.max(1, Math.round(next.interval * 1.2));
+  const goodInterval = Math.max(hardInterval + 1, next.reps === 1 ? 6 : Math.round(next.interval * next.ease));
 
   switch (rating) {
     case RATINGS.AGAIN: {
@@ -50,22 +52,20 @@ export function applyRating(card, rating, at = new Date()) {
     }
     case RATINGS.HARD: {
       next.ease = Math.max(MIN_EASE, next.ease - 0.15);
-      next.interval = next.reps === 0 ? 1 : Math.max(1, Math.round(next.interval * 1.2));
+      next.interval = hardInterval;
       next.reps += 1;
       next.status = 'review';
       break;
     }
     case RATINGS.GOOD: {
-      if (next.reps === 0) next.interval = 1;
-      else if (next.reps === 1) next.interval = 6;
-      else next.interval = Math.round(next.interval * next.ease);
+      next.interval = goodInterval;
       next.reps += 1;
       next.status = 'review';
       break;
     }
     case RATINGS.EASY: {
       next.ease = next.ease + 0.15;
-      next.interval = next.reps === 0 ? 3 : Math.round(next.interval * next.ease * 1.3);
+      next.interval = Math.max(goodInterval + 1, Math.round(next.interval * next.ease * 1.3));
       next.reps += 1;
       next.status = 'review';
       break;
@@ -89,6 +89,8 @@ export function isDue(card, at = new Date()) {
 export function forecastLabel(interval) {
   if (interval <= 0) return 'اليوم';
   if (interval === 1) return 'يوم واحد';
+  if (interval === 2) return 'يومان';
+  if (interval <= 10) return `${interval} أيام`;
   if (interval < 30) return `${interval} يوم`;
   if (interval < 365) return `${Math.round(interval / 30)} شهر`;
   return `${(interval / 365).toFixed(1)} سنة`;
