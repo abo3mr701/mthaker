@@ -4,11 +4,25 @@
  * يبني كل يوم مجموعة من الكلمات الجديدة كلياً (لم تُعرض من قبل) بحد أقصى
  * targetCount (افتراضيًا 100)، بنسبة 60-70% سهلة (A1-A2) و30-40% متوسطة
  * فأعلى (B1-B2)، مع إعادة توازن ديناميكية إذا نفدت إحدى المجموعتين، وبدون
- * أي تكرار — أي كلمة ظهرت سابقًا (seenIds) لا تُعاد أبدًا.
+ * تكرار في الكلمات الجديدة فقط؛ المراجعات المستحقة تُضاف عبر buildReviewQueue.
  */
 
 const EASY_LEVELS = new Set(['A1', 'A2']);
 const HARD_LEVELS = new Set(['B1', 'B2', 'C1', 'C2']);
+
+/** Due reviews are independent of the daily new-word target and seenIds. */
+export function buildReviewQueue(wordBank, cards, dailyWordIds = [], at = new Date()) {
+  const wordById = new Map(wordBank.map(word => [word.id, word]));
+  const ids = new Set([...dailyWordIds, ...Object.keys(cards)]);
+  return [...ids]
+    .filter(id => wordById.has(id) && (!cards[id] || new Date(cards[id].dueDate) <= at))
+    .sort((a, b) => {
+      const aDue = cards[a] ? new Date(cards[a].dueDate).getTime() : 0;
+      const bDue = cards[b] ? new Date(cards[b].dueDate).getTime() : 0;
+      return aDue - bDue;
+    })
+    .map(id => wordById.get(id));
+}
 
 function shuffle(arr) {
   const a = [...arr];

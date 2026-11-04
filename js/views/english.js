@@ -10,7 +10,7 @@
 import { oxfordWords } from '../data/oxfordWords.js';
 import { englishCards as cardsDB, englishWords as customWordsDB, settings } from '../db.js';
 import { createNewCard, applyRating, isDue, forecastLabel, RATINGS } from '../services/englishSrs.js';
-import { generateDailyQueue } from '../services/englishQueue.js';
+import { generateDailyQueue, buildReviewQueue } from '../services/englishQueue.js';
 import { generateEnglishWordEntry, askAboutWord, extractEnglishWordList, extractTextFromImage } from '../services/gemini.js';
 import { extractFileContent, needsVisionOCR, validateFile } from '../services/extractor.js';
 import { uid, showToast, escHtml, todayStr } from '../utils/helpers.js';
@@ -29,9 +29,9 @@ const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
 
 const RATING_BUTTONS = [
   { key: RATINGS.AGAIN, label: 'مرة أخرى', hint: 'أقل من دقيقة', cls: 'btn-rate-again' },
-  { key: RATINGS.HARD,  label: 'صعب',      hint: '~يوم واحد',    cls: 'btn-rate-hard'  },
-  { key: RATINGS.GOOD,  label: 'جيد',      hint: '~6 أيام',      cls: 'btn-rate-good'  },
-  { key: RATINGS.EASY,  label: 'سهل',      hint: '~10 أيام+',    cls: 'btn-rate-easy'  },
+  { key: RATINGS.HARD,  label: 'صعب',      cls: 'btn-rate-hard'  },
+  { key: RATINGS.GOOD,  label: 'جيد',      cls: 'btn-rate-good'  },
+  { key: RATINGS.EASY,  label: 'سهل',      cls: 'btn-rate-easy'  },
 ];
 
 const STATUS_FILTERS = [
@@ -82,7 +82,7 @@ async function loadState() {
     queue: queue || { date: null, wordIds: [] },
     stats: stats || { ...DEFAULT_STATS },
     dailyTarget: target || DEFAULT_TARGET,
-    sessionIndex: S?.sessionIndex || 0,
+    sessionIndex: 0,
     activeTab: S?.activeTab,
     levelFilter: S?.levelFilter,
     statusFilter: S?.statusFilter,
@@ -177,8 +177,12 @@ function renderDashboardTab(container, el) {
   const totalSeen  = S.seenIds.size;
   const totalBank  = S.wordBank.length;
   const remaining  = Math.max(0, totalBank - totalSeen);
-  const todayTotal = S.queue.wordIds.length;
-  const todayDone  = S.queue.wordIds.filter(id => wasReviewedToday(S.cards[id])).length;
+  const todayIds = new Set([
+    ...S.queue.wordIds,
+    ...Object.values(S.cards).filter(c => isDue(c) || wasReviewedToday(c)).map(c => c.id),
+  ]);
+  const todayTotal = [...todayIds].filter(id => S.wordById.has(id)).length;
+  const todayDone  = [...todayIds].filter(id => S.wordById.has(id) && wasReviewedToday(S.cards[id]) && !isDue(S.cards[id])).length;
   const pct = todayTotal ? Math.min(100, Math.round((todayDone / todayTotal) * 100)) : 0;
 
   el.innerHTML = `
@@ -222,7 +226,7 @@ function renderDashboardTab(container, el) {
         <div class="study-progress-bar"><div class="study-progress-fill" style="width:${pct}%"></div></div>
         <p class="text-muted text-sm" style="margin-top:var(--s4)">
           ${todayTotal === 0
-            ? 'تم تقديم كل الكلمات المتاحة حالياً — أضف كلمات خاصة بك من «مفرداتي» لتكمل.'
+            ? 'لا توجد مراجعات مستحقة أو كلمات جديدة الآن. ستعود كلماتك عند موعد مراجعتها.'
             : pct === 100
               ? 'أنجزت كل شيء اليوم! 🎉'
               : `تبقّى ${todayTotal - todayDone} كلمة في دفعة اليوم.`}
@@ -292,43 +296,34 @@ function openTargetModal(container) {
 
 /* ─── "كلمات اليوم" tab — نفس بطاقة القلب المستخدمة في «بطاقات المراجعة» ── */
 function renderTodayTab(container, el) {
-  const words = S.queue.wordIds.map(id => S.wordById.get(id)).filter(Boolean);
-  const total = words.length;
+  const words = buildReviewQueue(S.wordBank, S.cards, S.queue.wordIds);
+  const index = S.sessionIndex;
+  const total = index + words.length;
 
-  if (total === 0) {
+  if (words.length === 0) {
+    const nextDue = Object.values(S.cards)
+      .filter(card => S.wordById.has(card.id) && !isDue(card) && Number.isFinite(new Date(card.dueDate).getTime()))
+      .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))[0];
+    const nextLabel = nextDue ? new Date(nextDue.dueDate).toLocaleString('ar-SA') : '';
     el.innerHTML = `
       <div class="study-done">
         <div class="study-done-icon">🎉</div>
-        <h3 class="study-done-title">لا توجد كلمات جديدة متاحة الآن</h3>
-        <p class="text-muted">تم تقديم كل كلمة في القاموس الحالي. أضف كلماتك الخاصة من «مفرداتي».</p>
+        <h3 class="study-done-title">${index ? 'انتهت الجلسة!' : 'لا توجد كلمات مستحقة الآن'}</h3>
+        <p class="text-muted">${index ? `راجعت ${index} كلمة في هذه الجلسة. ` : ''}ستعود كلماتك عند موعد مراجعتها.</p>
+        ${nextLabel ? `<p class="text-muted">أقرب مراجعة: ${escHtml(nextLabel)}</p>` : ''}
         <div style="margin-top:var(--s6);">
+          <button class="btn btn-secondary" id="eng-refresh">🔄 تحديث المراجعات</button>
           <button class="btn btn-primary" id="eng-empty-go-mydeck">📚 اذهب لمفرداتي</button>
         </div>
       </div>
     `;
+    el.querySelector('#eng-refresh')?.addEventListener('click', () => renderEnglish(container));
     el.querySelector('#eng-empty-go-mydeck')?.addEventListener('click', () => switchTab(container, 'mydeck'));
     return;
   }
 
-  const index    = Math.min(S.sessionIndex, total);
-  const complete = index >= total;
-
-  if (complete) {
-    el.innerHTML = `
-      <div class="study-done">
-        <div class="study-done-icon">🏆</div>
-        <h3 class="study-done-title">انتهت الجلسة!</h3>
-        <p class="text-muted">راجعت ${total} من ${total} كلمة اليوم.</p>
-        <div style="margin-top:var(--s6);">
-          <button class="btn btn-primary" id="eng-restart">🔄 راجع مرة أخرى</button>
-        </div>
-      </div>
-    `;
-    el.querySelector('#eng-restart')?.addEventListener('click', () => { S.sessionIndex = 0; renderTodayTab(container, el); });
-    return;
-  }
-
-  const word = words[index];
+  const word = words[0];
+  const currentCard = S.cards[word.id] || createNewCard(word.id);
 
   el.innerHTML = `
     <p class="study-counter" id="eng-counter">البطاقة ${index + 1} من ${total}</p>
@@ -357,7 +352,7 @@ function renderTodayTab(container, el) {
 
     <div class="rate-grid" id="eng-rate-grid" style="display:none;">
       ${RATING_BUTTONS.map(b => `
-        <button class="btn ${b.cls}" data-rating="${b.key}">${b.label}<span>${b.hint}</span></button>
+        <button class="btn ${b.cls}" data-rating="${b.key}">${b.label}<span>${b.hint || forecastLabel(applyRating(currentCard, b.key).interval)}</span></button>
       `).join('')}
     </div>
     <p class="text-muted text-xs text-center mt-4">انقر البطاقة لقلبها، ثم اختر تقييمك</p>
@@ -414,17 +409,32 @@ function bindFlashcard(container, el, word) {
   });
   el.querySelector('#eng-ask-ai')?.addEventListener('click', (e) => { e.stopPropagation(); openAskAiModal(word); });
 
-  rateGrid.querySelectorAll('[data-rating]').forEach(btn => {
+  const ratingButtons = [...rateGrid.querySelectorAll('[data-rating]')];
+  let saving = false;
+  ratingButtons.forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
+      if (saving) return;
+      saving = true;
+      ratingButtons.forEach(button => { button.disabled = true; });
       const current = S.cards[word.id] || createNewCard(word.id);
       const updated = applyRating(current, btn.dataset.rating);
-      S.cards[word.id] = updated;
-      S.stats.totalReviewed += 1;
-      touchStreak();
-      await Promise.all([cardsDB.save(updated), persistState()]);
-      S.sessionIndex += 1;
-      renderTodayTab(container, el);
+      try {
+        // Do not advance or hide the card unless its review date was saved.
+        await cardsDB.save(updated);
+        S.cards[word.id] = updated;
+        S.stats.totalReviewed += 1;
+        touchStreak();
+        try { await persistState(); } catch {
+          showToast('تم حفظ المراجعة، لكن تعذّر تحديث الإحصائيات. أعد تحميل الصفحة لاحقاً.', 'warning');
+        }
+        S.sessionIndex += 1;
+        paint(container);
+      } catch {
+        showToast('تعذّر حفظ المراجعة. حاول مرة أخرى.', 'error');
+        saving = false;
+        ratingButtons.forEach(button => { button.disabled = false; });
+      }
     });
   });
 }

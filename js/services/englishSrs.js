@@ -35,9 +35,9 @@ export function createNewCard(wordId) {
  * @param {object} card حالة البطاقة الحالية
  * @param {'again'|'hard'|'good'|'easy'} rating
  */
-export function applyRating(card, rating) {
+export function applyRating(card, rating, at = new Date()) {
   const next = { ...card };
-  const now  = new Date();
+  const now  = new Date(at);
 
   switch (rating) {
     case RATINGS.AGAIN: {
@@ -65,7 +65,7 @@ export function applyRating(card, rating) {
     }
     case RATINGS.EASY: {
       next.ease = next.ease + 0.15;
-      next.interval = next.reps === 0 ? 4 : Math.round(next.interval * next.ease * 1.3);
+      next.interval = next.reps === 0 ? 3 : Math.round(next.interval * next.ease * 1.3);
       next.reps += 1;
       next.status = 'review';
       break;
