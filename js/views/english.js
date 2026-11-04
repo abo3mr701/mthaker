@@ -9,7 +9,7 @@
 
 import { oxfordWords, legacyOxfordWords } from '../data/oxfordWords.js';
 import { englishCards as cardsDB, englishWords as customWordsDB, settings } from '../db.js';
-import { createNewCard, applyRating, isDue, forecastLabel, RATINGS } from '../services/englishSrs.js';
+import { createNewCard, applyRating, isDue, isReviewActive, forecastLabel, RATINGS } from '../services/englishSrs.js';
 import { englishMessageForDay } from '../data/dailyMotivation.js';
 import { localStudyDay } from '../services/reviewPlanSchedule.js';
 import { generateDailyQueue, buildReviewQueue } from '../services/englishQueue.js';
@@ -32,10 +32,10 @@ const DEFAULT_TARGET = 10; // يدوي بالكامل — المستخدم يق�
 const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
 
 const RATING_BUTTONS = [
-  { key: RATINGS.AGAIN, label: 'مرة أخرى', hint: 'أقل من دقيقة', cls: 'btn-rate-again' },
-  { key: RATINGS.HARD,  label: 'صعب',      cls: 'btn-rate-hard'  },
-  { key: RATINGS.GOOD,  label: 'جيد',      cls: 'btn-rate-good'  },
-  { key: RATINGS.EASY,  label: 'سهل',      cls: 'btn-rate-easy'  },
+  { key: RATINGS.HARD,      label: 'صعب جدًا', cls: 'btn-rate-again' },
+  { key: RATINGS.GOOD,      label: 'متوسط',   cls: 'btn-rate-hard'  },
+  { key: RATINGS.EASY,      label: 'سهل',     cls: 'btn-rate-good'  },
+  { key: RATINGS.VERY_EASY, label: 'سهل جدًا', cls: 'btn-rate-easy'  },
 ];
 
 const STATUS_FILTERS = [
@@ -44,7 +44,42 @@ const STATUS_FILTERS = [
   { id: 'new',      label: 'جديدة'       },
   { id: 'learning', label: 'قيد التعلم'  },
   { id: 'review',   label: 'مراجعة'      },
+  { id: 'mastered', label: 'متقنة'       },
 ];
+
+function speakEnglish(text) {
+  if (!window.speechSynthesis || !text) return;
+  const speech = window.speechSynthesis;
+  const voices = speech.getVoices().filter(voice => /^en(?:-|$)/i.test(voice.lang));
+  const american = voices.filter(voice => /^en-US$/i.test(voice.lang));
+  const voice = american.find(voice => /natural|neural|premium|enhanced|google us english/i.test(voice.name))
+    || american.find(voice => !voice.localService)
+    || voices.find(voice => /natural|neural|premium|enhanced/i.test(voice.name))
+    || american.find(voice => /samantha|aria|jenny|zira/i.test(voice.name))
+    || american[0] || voices[0];
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = voice?.lang || 'en-US';
+  if (voice) utterance.voice = voice;
+  utterance.rate = 0.87;
+  speech.cancel();
+  speech.speak(utterance);
+}
+
+async function removeWord(word, button, onRemoved) {
+  if (!window.confirm(`حذف «${word.word}» من مفرداتك ومراجعاتك؟`)) return;
+  button.disabled = true;
+  const card = S.cards[word.id] || createNewCard(word.id);
+  const removed = { ...card, status: 'removed', dueDate: null };
+  try {
+    await cardsDB.save(removed);
+    S.cards[word.id] = removed;
+    showToast('تم حذف الكلمة من مفرداتك ومراجعاتك.', 'success');
+    onRemoved();
+  } catch {
+    showToast('تعذّر حذف الكلمة. حاول مرة أخرى.', 'error');
+    button.disabled = false;
+  }
+}
 
 /* ─── Module state (reloaded fresh every time the page renders) ── */
 let S = null;
@@ -189,10 +224,11 @@ function renderDashboardTab(container, el) {
   const remaining  = Math.max(0, totalBank - totalSeen);
   const todayIds = new Set([
     ...S.queue.wordIds,
-    ...Object.values(S.cards).filter(c => isDue(c) || wasReviewedToday(c)).map(c => c.id),
+    ...Object.values(S.cards).filter(c => c.status !== 'removed' && (isDue(c) || wasReviewedToday(c))).map(c => c.id),
   ]);
-  const todayTotal = [...todayIds].filter(id => S.wordById.has(id)).length;
-  const todayDone  = [...todayIds].filter(id => S.wordById.has(id) && wasReviewedToday(S.cards[id]) && !isDue(S.cards[id])).length;
+  const todayCards = [...todayIds].filter(id => S.wordById.has(id) && S.cards[id]?.status !== 'removed');
+  const todayTotal = todayCards.length;
+  const todayDone  = todayCards.filter(id => wasReviewedToday(S.cards[id]) && !isDue(S.cards[id])).length;
   const pct = todayTotal ? Math.min(100, Math.round((todayDone / todayTotal) * 100)) : 0;
 
   el.innerHTML = `
@@ -312,7 +348,7 @@ function renderTodayTab(container, el) {
 
   if (words.length === 0) {
     const nextDue = Object.values(S.cards)
-      .filter(card => S.wordById.has(card.id) && !isDue(card) && Number.isFinite(new Date(card.dueDate).getTime()))
+      .filter(card => S.wordById.has(card.id) && isReviewActive(card) && card.dueDate && !isDue(card) && Number.isFinite(new Date(card.dueDate).getTime()))
       .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))[0];
     const nextLabel = nextDue ? new Date(nextDue.dueDate).toLocaleString('ar-SA') : '';
     el.innerHTML = `
@@ -347,7 +383,7 @@ function renderTodayTab(container, el) {
           <span class="stage-badge level-badge level-${(word.level || 'A1').toLowerCase()}">${word.level || 'A1'} · ${escHtml(word.pos || '—')}</span>
           <p class="study-card-text" dir="ltr">${escHtml(word.word)}</p>
           <button class="btn btn-sm btn-secondary" id="eng-speak-front" type="button">🔊 نطق</button>
-          <p class="study-card-hint">اكتب إجابتك تحت البطاقة</p>
+          <p class="study-card-hint">اضغط البطاقة لكشف الترجمة</p>
         </div>
         <div class="study-card-face study-card-back">
           <p class="study-card-text" dir="rtl">${escHtml(word.ar || '—')}</p>
@@ -372,14 +408,17 @@ function renderTodayTab(container, el) {
           <textarea class="form-input" rows="2" dir="ltr"></textarea>
         </label>
       </div>
-      <button type="submit" class="btn btn-secondary">اكشف الإجابة</button>
+      <button type="submit" formnovalidate class="btn btn-secondary">اكشف الإجابة</button>
     </form>
     <div class="rate-grid" id="eng-rate-grid" style="display:none;">
-      ${RATING_BUTTONS.map(b => `
-        <button class="btn ${b.cls}" data-rating="${b.key}">${b.label}<span>${b.hint || forecastLabel(applyRating(currentCard, b.key).interval)}</span></button>
-      `).join('')}
+      ${RATING_BUTTONS.map(b => {
+        const next = applyRating(currentCard, b.key);
+        const hint = next.status === 'mastered' ? 'تخرج من المراجعات' : forecastLabel(next.interval);
+        return `<button class="btn ${b.cls}" data-rating="${b.key}">${b.label}<span>${hint}</span></button>`;
+      }).join('')}
     </div>
-    <p class="text-muted text-xs text-center mt-4">اكتب إجابتك، ثم قارنها بالبطاقة واختر تقييمك.</p>
+    <p class="text-muted text-xs text-center mt-4">تقدر تكشف الإجابة أولًا. اكتب الترجمة والكلمة قبل التقييم.</p>
+    <div class="text-center mt-4"><button type="button" class="btn btn-sm btn-danger" id="eng-remove-word">حذف الكلمة</button></div>
   `;
 
   bindFlashcard(container, el, word);
@@ -417,17 +456,7 @@ function bindFlashcard(container, el, word) {
     return true;
   }
 
-  function speak(text) {
-    if (!('speechSynthesis' in window) || !text) return;
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'en-US';
-    u.rate = 0.95;
-    window.speechSynthesis.speak(u);
-  }
-
   function flip() {
-    if (!flipped && !practiceComplete()) return;
     flipped = !flipped;
     inner.classList.toggle('flipped', flipped);
     rateGrid.style.display = flipped ? 'grid' : 'none';
@@ -446,19 +475,24 @@ function bindFlashcard(container, el, word) {
     if ((e.key === ' ' || e.key === 'Enter') && !e.target.closest('button, a')) { e.preventDefault(); flip(); }
   });
 
-  el.querySelector('#eng-speak-front')?.addEventListener('click', (e) => { e.stopPropagation(); speak(word.word); });
+  el.querySelector('#eng-speak-front')?.addEventListener('click', (e) => { e.stopPropagation(); speakEnglish(word.word); });
   el.querySelectorAll('[data-speak]').forEach(btn => {
-    btn.addEventListener('click', (e) => { e.stopPropagation(); speak(btn.dataset.speak); });
+    btn.addEventListener('click', (e) => { e.stopPropagation(); speakEnglish(btn.dataset.speak); });
   });
   el.querySelector('#eng-ask-ai')?.addEventListener('click', (e) => { e.stopPropagation(); openAskAiModal(word); });
 
   const ratingButtons = [...rateGrid.querySelectorAll('[data-rating]')];
+  const removeButton = el.querySelector('#eng-remove-word');
   let saving = false;
+  removeButton.addEventListener('click', () => {
+    if (!saving) removeWord(word, removeButton, () => paint(container));
+  });
   ratingButtons.forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (saving || !practiceComplete()) return;
+      if (saving || removeButton.disabled || !practiceComplete()) return;
       saving = true;
+      removeButton.disabled = true;
       ratingButtons.forEach(button => { button.disabled = true; });
       const current = S.cards[word.id] || createNewCard(word.id);
       const updated = applyRating(current, btn.dataset.rating);
@@ -466,6 +500,7 @@ function bindFlashcard(container, el, word) {
         // Do not advance or hide the card unless its review date was saved.
         await cardsDB.save(updated);
         S.cards[word.id] = updated;
+        if (updated.status === 'mastered') showToast('أتقنت الكلمة! خرجت من المراجعات.', 'success');
         S.stats.totalReviewed += 1;
         touchStreak();
         try { await persistState(); } catch {
@@ -476,6 +511,7 @@ function bindFlashcard(container, el, word) {
       } catch {
         showToast('تعذّر حفظ المراجعة. حاول مرة أخرى.', 'error');
         saving = false;
+        removeButton.disabled = false;
         ratingButtons.forEach(button => { button.disabled = false; });
       }
     });
@@ -569,7 +605,7 @@ async function activateCatalogWords(words) {
 
 function renderMyDeckTab(container, el) {
   const entries = S.wordBank
-    .filter(w => S.cards[w.id])
+    .filter(w => S.cards[w.id] && S.cards[w.id].status !== 'removed')
     .map(w => ({ word: w, card: S.cards[w.id] }));
 
   el.innerHTML = `
@@ -619,17 +655,16 @@ function renderMyDeckTab(container, el) {
 
     grid.querySelectorAll('.flashcard-item').forEach(row => {
       row.addEventListener('click', (e) => {
-        if (e.target.closest('[data-speak]')) return;
+        if (e.target.closest('button, a')) return;
         row.classList.toggle('open');
       });
       row.querySelector('[data-speak]')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        const text = e.currentTarget.dataset.speak;
-        if (!('speechSynthesis' in window)) return;
-        window.speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(text);
-        u.lang = 'en-US';
-        window.speechSynthesis.speak(u);
+        speakEnglish(e.currentTarget.dataset.speak);
+      });
+      row.querySelector('[data-remove-word]').addEventListener('click', event => {
+        const word = S.wordById.get(row.dataset.wordId);
+        if (word) removeWord(word, event.currentTarget, () => paint(container));
       });
     });
   }
@@ -661,19 +696,23 @@ function renderMyDeckTab(container, el) {
 
 function deckRowHtml(word, card) {
   const due = isDue(card);
-  const statusLabel = due ? 'مستحقة الآن' : `بعد ${forecastLabel(daysUntil(card.dueDate))}`;
+  const statusLabel = card.status === 'mastered' ? 'متقنة · خارج المراجعات'
+    : due ? 'مستحقة الآن' : `بعد ${forecastLabel(daysUntil(card.dueDate))}`;
   return `
-    <div class="flashcard-item" data-word-id="${word.id}" style="cursor:pointer;flex-direction:column;align-items:stretch;">
+    <div class="flashcard-item" data-word-id="${escHtml(word.id)}" style="cursor:pointer;flex-direction:column;align-items:stretch;">
       <div class="flex" style="justify-content:space-between;align-items:center;">
         <div>
           <span style="font-weight:700;" dir="ltr">${escHtml(word.word)}</span>
           <span class="stage-badge level-badge level-${(word.level || 'A1').toLowerCase()}">${word.level || 'A1'}</span>
           ${word.custom ? `<span class="category-badge">مخصصة</span>` : ''}
         </div>
-        <button class="tts-btn-inline" data-speak="${escHtml(word.word)}">🔊</button>
+        <div class="flex gap-2">
+          <button type="button" class="tts-btn-inline" data-speak="${escHtml(word.word)}" aria-label="نطق الكلمة">🔊</button>
+          <button type="button" class="btn btn-sm btn-danger" data-remove-word>حذف</button>
+        </div>
       </div>
       <p class="text-muted text-xs" style="margin-top:var(--s2);">
-        ${due ? `<span style="color:var(--warning);font-weight:700;">${statusLabel}</span>` : statusLabel} · ${card.status}
+        ${due ? `<span style="color:var(--warning);font-weight:700;">${statusLabel}</span>` : statusLabel}
       </p>
       <div class="deck-row-detail">
         ${word.ar ? `<p dir="rtl" style="margin:var(--s3) 0;font-weight:600;">${escHtml(word.ar)}</p>` : ''}

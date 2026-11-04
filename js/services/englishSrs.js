@@ -10,10 +10,16 @@ export const RATINGS = {
   HARD:  'hard',
   GOOD:  'good',
   EASY:  'easy',
+  VERY_EASY: 'very-easy',
 };
 
 const MIN_EASE     = 1.3;
 const DEFAULT_EASE = 2.5;
+const MASTERY_EASY_COUNT = 3;
+
+export function isReviewActive(card) {
+  return card.status !== 'mastered' && card.status !== 'removed';
+}
 
 export function createNewCard(wordId) {
   const now = new Date().toISOString();
@@ -23,7 +29,8 @@ export function createNewCard(wordId) {
     interval:     0,        // أيام حتى المراجعة القادمة
     reps:         0,        // عدد المراجعات المتتالية الناجحة
     lapses:       0,
-    status:       'new',    // new | learning | review
+    status:       'new',    // new | learning | review | mastered | removed
+    easyCount:    0,
     dueDate:      now,
     lastReviewed: null,
     lastRating:   null,
@@ -33,13 +40,12 @@ export function createNewCard(wordId) {
 /**
  * تطبيق تقييم على بطاقة وإرجاع حالتها الجديدة.
  * @param {object} card حالة البطاقة الحالية
- * @param {'again'|'hard'|'good'|'easy'} rating
+ * @param {'again'|'hard'|'good'|'easy'|'very-easy'} rating
  */
 export function applyRating(card, rating, at = new Date()) {
+  if (!isReviewActive(card)) return card;
   const next = { ...card };
   const now  = new Date(at);
-  const hardInterval = next.reps === 0 ? 1 : Math.max(1, Math.round(next.interval * 1.2));
-  const goodInterval = Math.max(hardInterval + 1, next.reps === 1 ? 6 : Math.round(next.interval * next.ease));
 
   switch (rating) {
     case RATINGS.AGAIN: {
@@ -52,22 +58,29 @@ export function applyRating(card, rating, at = new Date()) {
     }
     case RATINGS.HARD: {
       next.ease = Math.max(MIN_EASE, next.ease - 0.15);
-      next.interval = hardInterval;
+      next.interval = 1;
       next.reps += 1;
       next.status = 'review';
       break;
     }
     case RATINGS.GOOD: {
-      next.interval = goodInterval;
+      next.interval = 2;
       next.reps += 1;
       next.status = 'review';
       break;
     }
     case RATINGS.EASY: {
       next.ease = next.ease + 0.15;
-      next.interval = Math.max(goodInterval + 1, Math.round(next.interval * next.ease * 1.3));
+      next.interval = 3;
       next.reps += 1;
       next.status = 'review';
+      break;
+    }
+    case RATINGS.VERY_EASY: {
+      next.easyCount = (next.easyCount ?? 0) + 1;
+      next.interval = 10;
+      next.reps += 1;
+      next.status = next.easyCount >= MASTERY_EASY_COUNT ? 'mastered' : 'review';
       break;
     }
     default:
@@ -76,14 +89,14 @@ export function applyRating(card, rating, at = new Date()) {
 
   const due = new Date(now);
   due.setDate(due.getDate() + next.interval);
-  next.dueDate      = due.toISOString();
+  next.dueDate      = isReviewActive(next) ? due.toISOString() : null;
   next.lastReviewed = now.toISOString();
   next.lastRating   = rating;
   return next;
 }
 
 export function isDue(card, at = new Date()) {
-  return new Date(card.dueDate) <= at;
+  return isReviewActive(card) && card.dueDate != null && new Date(card.dueDate) <= at;
 }
 
 export function forecastLabel(interval) {

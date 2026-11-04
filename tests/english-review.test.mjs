@@ -2,11 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-async function moduleFrom(path) {
-  return import('data:text/javascript;base64,' + Buffer.from(await readFile(new URL(path, import.meta.url), 'utf8')).toString('base64'));
-}
-const srs = await moduleFrom('../js/services/englishSrs.js');
-const queue = await moduleFrom('../js/services/englishQueue.js');
+import * as srs from '../js/services/englishSrs.js';
+import * as queue from '../js/services/englishQueue.js';
 const words = [{id:'old',word:'return',level:'A1'}, {id:'new',word:'learn',level:'A2'}];
 const start = new Date('2026-11-04T09:00:00+03:00');
 const ids = result => result.map(word => word.id);
@@ -27,7 +24,7 @@ test('seen words excluded from new words are still returned as due reviews', () 
   assert.deepEqual(ids(queue.buildReviewQueue(words, {old:card}, [], new Date(card.dueDate))), ['old']);
 });
 
-for(const [rating, days] of [['hard',1], ['good',2], ['easy',3], ['again',0]]) {
+for(const [rating, days] of [['hard',1], ['good',2], ['easy',3], ['very-easy',10], ['again',0]]) {
   test(`${rating} returns at its scheduled time`, () => {
     const card = srs.applyRating(srs.createNewCard('old'), rating, start);
     assert.equal(card.interval, days);
@@ -65,16 +62,30 @@ test('old overdue cards retain their saved dates and return without migration', 
   assert.equal(card.dueDate,'2026-10-01T00:00:00Z');
 });
 
-test('subsequent easy reviews use the grown interval and return again', () => {
+test('ordinary easy reviews keep the three-day interval and do not count toward mastery', () => {
   const first = srs.applyRating(srs.createNewCard('old'), 'easy', start);
   const second = srs.applyRating(first,'easy',new Date(first.dueDate));
-  assert.ok(second.interval > first.interval);
+  assert.equal(second.interval, 3);
+  assert.equal(second.easyCount, 0);
   assert.deepEqual(ids(queue.buildReviewQueue(words,{old:second},[],new Date(second.dueDate))), ['old']);
   assert.equal(first.interval,3);
 });
 
+test('the third very easy rating retires a card even across reloads and other ratings', () => {
+  let card = srs.createNewCard('old');
+  delete card.easyCount;
+  for (const rating of ['very-easy', 'easy', 'very-easy', 'hard', 'very-easy']) {
+    card = JSON.parse(JSON.stringify(srs.applyRating(card, rating, start)));
+  }
+  assert.equal(card.easyCount, 3);
+  assert.equal(card.status, 'mastered');
+  assert.equal(card.dueDate, null);
+  const removed = { ...srs.createNewCard('new'), status: 'removed' };
+  assert.deepEqual(ids(queue.buildReviewQueue(words, { old: card, new: removed }, ['old', 'new'], new Date('2030-01-01'))), []);
+});
+
 class Element {
-  constructor() {this.style={};this.listeners={};this.dataset={};this.children=new Map();this.disabled=false;this.value='';}
+  constructor() {this.style={};this.listeners={};this.dataset={};this.children=new Map();this.disabled=false;this.value='';this.classList={toggle(){}};}
   reportValidity() {return Boolean(this.value);}
   set innerHTML(value) {this.html=value;this.children=new Map();}
   get innerHTML() {return this.html || '';}
@@ -84,7 +95,7 @@ class Element {
   }
   querySelectorAll(selector) {
     if(selector!=='[data-rating]')return [];
-    return ['again','hard','good','easy'].map(rating=>{
+    return ['hard','good','easy','very-easy'].map(rating=>{
       const button=this.querySelector(rating);button.dataset.rating=rating;return button;
     });
   }
@@ -108,7 +119,7 @@ async function viewFixture({failSave=false}={}) {
   globalThis.__englishDeps={...srs,...queue,escHtml:s=>String(s).replaceAll('<','&lt;'),todayStr:()=>new Date().toISOString().slice(0,10),
     showToast:message=>toasts.push(message),cardsDB:{save:async()=>{saves++;await gate;if(failSave)throw Error('offline');}},
     settings:{set:async()=>{}},oxfordWords:words,englishMessageForDay:()=>'',localStudyDay:()=> '2026-11-04'};
-  const shim='const {createNewCard,applyRating,isDue,forecastLabel,RATINGS,generateDailyQueue,buildReviewQueue,escHtml,todayStr,showToast,cardsDB,settings,oxfordWords,englishMessageForDay,localStudyDay}=globalThis.__englishDeps;\n';
+  const shim='const {createNewCard,applyRating,isDue,isReviewActive,forecastLabel,RATINGS,generateDailyQueue,buildReviewQueue,escHtml,todayStr,showToast,cardsDB,settings,oxfordWords,englishMessageForDay,localStudyDay}=globalThis.__englishDeps;\n';
   const hooks='\nexport function setState(state){S=state;} export {renderTodayTab};';
   const view=await import('data:text/javascript;base64,'+Buffer.from(shim+viewSource+hooks).toString('base64')+'#'+sequence++);
   view.setState(state);
@@ -136,6 +147,17 @@ test('rating requires a translation and a word, including when only spaces are e
     assert.equal(f.saves(),0);
     input.value='answer';
   }
+});
+
+test('an unanswered card can be revealed but cannot be rated', async () => {
+  const f = await viewFixture();
+  f.el.querySelector('#eng-answer-translation').value = '';
+  f.el.querySelector('#eng-answer-word').value = '';
+  f.el.querySelector('#eng-writing-practice').listeners.submit({ preventDefault() {} });
+  const ratings = f.el.querySelector('#eng-rate-grid');
+  assert.equal(ratings.style.display, 'grid');
+  await ratings.querySelector('very-easy').listeners.click({ stopPropagation() {} });
+  assert.equal(f.saves(), 0);
 });
 
 test('rating intervals remain ordered for existing cards',()=>{
