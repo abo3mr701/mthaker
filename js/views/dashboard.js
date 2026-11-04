@@ -40,7 +40,7 @@ export async function renderDashboard(container) {
         </div>
         <div class="welcome-meta-item">
           <div class="welcome-meta-val">${stats.pomodoroStats.todayCount}</div>
-          <div>جلسة بومودورو اليوم</div>
+          <div>جلسة مذاكرة اليوم</div>
         </div>
         <div class="welcome-meta-item">
           <div class="welcome-meta-val">${stats.pomodoroStats.totalHours}</div>
@@ -110,7 +110,7 @@ export async function renderDashboard(container) {
             ➕ مادة جديدة
           </button>
           <button class="btn btn-secondary w-full" id="dash-goto-pomodoro">
-            ⏱️ مؤقت بومودورو
+            ⏱️ مؤقت المذاكرة
           </button>
           <button class="btn btn-secondary w-full" id="dash-goto-reviews">
             🗓️ خطط مراجعة الدروس

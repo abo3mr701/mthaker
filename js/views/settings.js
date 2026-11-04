@@ -4,16 +4,14 @@
 
 import {
   settings as settingsDB,
-  subjects as subjectsDB_exp,
-  flashcards as flashcardsDB_exp,
-  files as filesDB_exp,
-  sessions as sessionsDB_exp,
-  history as historyDB_exp,
+  readStudyBackup,
+  restoreStudyBackup,
   clearAllUserData,
 } from '../db.js';
 import { validateApiKey } from '../services/gemini.js';
 import { getMaxDailyReviews, setMaxDailyReviews } from '../services/srs.js';
 import { showToast, showConfirm, escHtml } from '../utils/helpers.js';
+import { parseStudyBackup } from '../services/studyBackup.js';
 
 export async function renderSettings(container) {
   container.innerHTML = `<div class="flex-center" style="padding:var(--s10)"><div class="spinner"></div></div>`;
@@ -53,7 +51,7 @@ export async function renderSettings(container) {
             autocomplete="off" dir="ltr">
           <button class="input-toggle-btn" id="toggle-key-vis" title="إظهار/إخفاء">👁</button>
         </div>
-        <span class="form-hint">لا يُشارك مفتاحك مع أي خادم خارجي — يُستخدم مباشرة في متصفحك.</span>
+        <span class="form-hint">يُحفظ المفتاح في إعدادات حسابك ويستخدمه المتصفح لإرسال طلبات Gemini.</span>
       </div>
       <div id="api-key-status"></div>
       <div style="display:flex;gap:var(--s4);margin-top:var(--s5);">
@@ -99,10 +97,13 @@ export async function renderSettings(container) {
         <span class="settings-section-icon">🗄️</span> إدارة البيانات
       </div>
       <p class="text-muted text-sm mb-4">
-        جميع بياناتك محفوظة محلياً في متصفحك (IndexedDB). يمكنك تصديرها للنسخ الاحتياطي.
+        بيانات الدراسة مرتبطة بحسابك في Firebase. يمكنك تنزيل نسخة تشمل خطط المراجعة ومفردات الإنجليزية وسجل المذاكرة.
+        الاستعادة تضيف السجلات الناقصة وتُبقي السجلات الحالية. مفتاح Gemini خارج النسخة.
       </p>
       <div style="display:flex;gap:var(--s4);flex-wrap:wrap;">
         <button class="btn btn-secondary" id="export-data-btn">📤 تصدير البيانات (JSON)</button>
+        <button class="btn btn-secondary" id="restore-data-btn">📥 استعادة نسخة</button>
+        <input type="file" id="restore-data-file" accept=".json,application/json" hidden>
         <button class="btn btn-danger" id="clear-data-btn">⚠️ حذف جميع البيانات</button>
       </div>
     </div>
@@ -114,7 +115,7 @@ export async function renderSettings(container) {
       </div>
       <p class="text-muted text-sm">
         <strong>مذاكر</strong> — تطبيق تعليمي ذكي مفتوح المصدر.<br>
-        يعمل كلياً في المتصفح بدون خادم خلفي.<br>
+        يعمل في المتصفح ويزامن بيانات الدراسة عبر Firebase.<br>
         الإصدار: 1.0.0
       </p>
     </div>
@@ -198,6 +199,30 @@ function bindSettingsEvents(container, currentApiKey) {
 
   // Export data
   container.querySelector('#export-data-btn')?.addEventListener('click', exportAllData);
+  const restoreButton = container.querySelector('#restore-data-btn');
+  const restoreInput = container.querySelector('#restore-data-file');
+  restoreButton?.addEventListener('click', () => restoreInput.click());
+  restoreInput?.addEventListener('change', async () => {
+    const file = restoreInput.files[0];
+    restoreInput.value = '';
+    if (!file) return;
+    restoreButton.disabled = true;
+    let importing = false;
+    try {
+      if (file.size > 25_000_000) throw new Error('حجم الملف أكبر من 25 ميغابايت.');
+      const data = parseStudyBackup(await file.text());
+      const count = Object.values(data).reduce((sum, rows) => sum + rows.length, 0);
+      if (!count) { showToast('النسخة لا تحتوي على سجلات.', 'info'); return; }
+      if (!await showConfirm('استعادة نسخة مذاكر', `النسخة تحتوي على ${count} سجل. ستُضاف السجلات الناقصة فقط.`)) return;
+      importing = true;
+      const added = await restoreStudyBackup(data);
+      showToast(`تمت الاستعادة. أضيف ${added} سجل.`, 'success');
+    } catch (error) {
+      showToast(importing ? 'توقفت الاستعادة. يمكنك المحاولة مجددًا لإضافة السجلات المتبقية.' : error.message, 'error');
+    } finally {
+      restoreButton.disabled = false;
+    }
+  });
 
   // Clear all data
   container.querySelector('#clear-data-btn')?.addEventListener('click', async () => {
@@ -239,25 +264,13 @@ function setApiStatus(container, state, errorMsg = '') {
 /* ─── Export all data as JSON download ───────────────────── */
 async function exportAllData() {
   try {
-    const [s, c, f, se, h] = await Promise.all([
-      subjectsDB_exp.getAll(),
-      flashcardsDB_exp.getAll(),
-      filesDB_exp.getAll(),
-      sessionsDB_exp.getAll(),
-      historyDB_exp.getAll(),
-    ]);
-
-    // Strip extracted text from files (can be large) for export
-    const cleanFiles = f.map(({ extractedText, ...rest }) => rest);
+    const data = await readStudyBackup();
 
     const payload = JSON.stringify({
       exportedAt: new Date().toISOString(),
-      version: '1.0',
-      subjects: s,
-      flashcards: c,
-      files: cleanFiles,
-      sessions: se,
-      history: h,
+      app: 'mthaker',
+      version: '2.0',
+      ...data,
     }, null, 2);
 
     const blob = new Blob([payload], { type: 'application/json' });

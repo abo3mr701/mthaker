@@ -47,7 +47,7 @@ function renderDetailUI(container, subject, cards, subjectFiles) {
     <!-- Subject header -->
     <div class="subject-detail-header">
       <div class="subject-detail-color" style="background:${subject.color}">
-        ${subject.name.charAt(0)}
+        ${escHtml(subject.name.charAt(0))}
       </div>
       <div>
         <h2 class="subject-detail-name">${escHtml(subject.name)}</h2>

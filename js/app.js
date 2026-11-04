@@ -12,14 +12,14 @@
 import { dbReady, settings as settingsDB } from './db.js';
 import { watchAuthState, signOutUser } from './services/authService.js';
 import { renderAuthScreen } from './views/auth.js';
-import { showConfirm } from './utils/helpers.js';
+import { showConfirm, escHtml } from './utils/helpers.js';
 
 import { renderDashboard }     from './views/dashboard.js';
 import { renderSubjects }      from './views/subjects.js';
 import { renderSubjectDetail } from './views/subject-detail.js';
 import { renderStudy }         from './views/study.js';
 import { renderReviews }       from './views/reviews.js';
-import { renderPomodoro }      from './views/pomodoro.js';
+import { renderPomodoro, resetStudyTimer } from './views/pomodoro.js';
 import { renderSettings }      from './views/settings.js';
 import { renderChat }          from './views/chat.js';
 
@@ -37,7 +37,7 @@ const ROUTES = [
   { pattern: /^#?study$/,             view: 'study',          title: 'مراجعة البطاقات',  navId: 'study'      },
   { pattern: /^#?reviews$/,           view: 'reviews',        title: 'المراجعات',        navId: 'reviews'    },
   { pattern: /^#?english$/,           view: 'english',        title: 'الإنجليزية',       navId: 'english'    },
-  { pattern: /^#?pomodoro$/,          view: 'pomodoro',       title: 'مؤقت بومودورو',   navId: 'pomodoro'   },
+  { pattern: /^#?pomodoro$/,          view: 'pomodoro',       title: 'مؤقت المذاكرة',  navId: 'pomodoro'   },
   { pattern: /^#?chat$/,              view: 'chat',           title: 'المساعد الذكي',   navId: 'chat'       },
   { pattern: /^#?settings$/,          view: 'settings',       title: 'الإعدادات',       navId: 'settings'   },
 ];
@@ -75,6 +75,8 @@ async function init() {
         await startApp();
       }
     } else {
+      routeVersion++;
+      resetStudyTimer();
       _appStarted = false;
       document.getElementById('app')?.classList.add('hidden');
       document.getElementById('loading-screen')?.classList.add('fade-out');
@@ -121,7 +123,9 @@ function setupSignOut() {
 }
 
 /* ─── Router ───────────────────────────────────────────────── */
+let routeVersion = 0;
 async function route() {
+  const version = ++routeVersion;
   const hash   = window.location.hash.replace('#', '') || 'dashboard';
   const viewEl = document.getElementById('view');
   if (!viewEl) return;
@@ -156,19 +160,22 @@ async function route() {
   // Animate view out, render, animate in
   viewEl.style.opacity   = '0';
   viewEl.style.transform = 'translateY(8px)';
+  const content = document.createElement('div');
 
   try {
-    await renderView(matched.view, viewEl, params);
+    await renderView(matched.view, content, params);
   } catch (err) {
     console.error('Router render error:', err);
-    viewEl.innerHTML = `
+    content.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">⚠️</div>
         <h3 class="empty-title">خطأ في تحميل الصفحة</h3>
-        <p class="empty-sub">${err.message}</p>
+        <p class="empty-sub">${escHtml(err.message)}</p>
         <button class="btn btn-secondary" onclick="window.location.hash='#dashboard'">← الرئيسية</button>
       </div>`;
   }
+  if (version !== routeVersion) return;
+  viewEl.replaceChildren(content);
 
   // Animate in
   requestAnimationFrame(() => {

@@ -15,8 +15,9 @@
 import { auth, firestore } from './services/firebase.js';
 import {
   collection, doc, getDoc, getDocs, setDoc, deleteDoc,
-  query, where, writeBatch,
+  query, where, writeBatch, runTransaction,
 } from 'https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js';
+import { sessionTotals } from './services/studyTime.js';
 
 // أسماء المجموعات (نفس أسماء المخازن القديمة بالضبط)
 const COLLECTIONS = {
@@ -165,14 +166,11 @@ export const sessions = {
 
   getStats: async () => {
     const all = await getAllDocs(COLLECTIONS.SESSIONS);
-    const completed = all.filter(s => s.completed);
-    const totalMs   = completed.reduce((acc, s) => acc + (s.durationMs || 0), 0);
-    const today     = new Date().toISOString().slice(0, 10);
-    const todayCount = completed.filter(s => s.date === today).length;
+    const totals = sessionTotals(all);
     return {
-      total:      completed.length,
-      todayCount,
-      totalHours: +(totalMs / 3_600_000).toFixed(1),
+      total:      totals.count,
+      todayCount: totals.todayCount,
+      totalHours: +(totals.all / 3_600_000).toFixed(1),
     };
   },
 };
@@ -275,6 +273,43 @@ export async function getDashboardStats() {
 // Firebase App يتهيّأ بشكل متزامن عند الاستيراد — ما يحتاج انتظار فعلي هنا،
 // أُبقي هذا التصدير فقط عشان app.js القديم اللي ينتظره ما ينكسر.
 export const dbReady = Promise.resolve();
+
+const BACKUP_COLLECTIONS = {
+  subjects: COLLECTIONS.SUBJECTS, flashcards: COLLECTIONS.CARDS, files: COLLECTIONS.FILES,
+  sessions: COLLECTIONS.SESSIONS, history: COLLECTIONS.HISTORY, reviewPlans: COLLECTIONS.PLANS,
+  englishCards: COLLECTIONS.ENG_CARDS, englishWords: COLLECTIONS.ENG_WORDS,
+};
+
+export async function readStudyBackup() {
+  return Object.fromEntries(await Promise.all(Object.entries(BACKUP_COLLECTIONS)
+    .map(async ([key, name]) => [key, await getAllDocs(name)])));
+}
+
+export async function restoreStudyBackup(data) {
+  const account = requireUid();
+  let added = 0;
+  for (const [key, name] of Object.entries(BACKUP_COLLECTIONS)) {
+    const rows = data[key] || [];
+    const target = collection(firestore, 'users', account, name);
+    for (let i = 0; i < rows.length; i += 100) {
+      if (requireUid() !== account) throw new Error('تغيّر الحساب أثناء الاستعادة.');
+      const chunk = rows.slice(i, i + 100);
+      added += await runTransaction(firestore, async transaction => {
+        if (requireUid() !== account) throw new Error('تغيّر الحساب أثناء الاستعادة.');
+        const refs = chunk.map(row => doc(target, String(row.id)));
+        const existing = await Promise.all(refs.map(ref => transaction.get(ref)));
+        let count = 0;
+        existing.forEach((snapshot, index) => {
+          if (snapshot.exists()) return;
+          transaction.set(refs[index], chunk[index]);
+          count++;
+        });
+        return count;
+      });
+    }
+  }
+  return added;
+}
 
 /* ─── Wipe everything for the current account ─────────────── */
 export async function clearAllUserData() {

@@ -43,7 +43,13 @@
           <img class="brand-glyph" src="assets/mthaker-logo.svg" alt="" width="40" height="40">
           <span class="brand-name">مذاكر</span>
         </div>
-        <button class="icon-btn sidebar-close" id="sidebar-close" aria-label="إغلاق القائمة">✕</button>
+        <div class="sidebar-tools">
+          <button type="button" class="theme-btn sidebar-theme" id="theme-toggle" aria-label="تبديل المظهر" title="تبديل المظهر">
+            <span class="theme-icon-light" aria-hidden="true">&#x1F319;</span>
+            <span class="theme-icon-dark" aria-hidden="true">&#x2600;</span>
+          </button>
+          <button class="icon-btn sidebar-close" id="sidebar-close" aria-label="إغلاق القائمة">✕</button>
+        </div>
       </div>
 
       <ul class="nav-list" role="list">
@@ -63,7 +69,7 @@
           <span class="nav-icon">&#x1F4D6;</span><span>الإنجليزية</span>
         </a></li>
         <li><a href="#pomodoro" class="nav-link" data-view="pomodoro">
-          <span class="nav-icon">&#x23F1;</span><span>مؤقت بومودورو</span>
+          <span class="nav-icon">&#x23F1;</span><span>مؤقت المذاكرة</span>
         </a></li>
         <li><a href="#chat" class="nav-link" data-view="chat">
           <span class="nav-icon">&#x1F916;</span><span>المساعد الذكي</span>
@@ -74,12 +80,8 @@
         <a href="#settings" class="nav-link" data-view="settings">
           <span class="nav-icon">&#x2699;</span><span>الإعدادات</span>
         </a>
-        <button class="nav-link" id="sign-out-btn" style="width:100%;border:none;background:none;cursor:pointer;text-align:start;font-family:inherit;">
+        <button class="nav-link" id="sign-out-btn">
           <span class="nav-icon">&#x1F6AA;</span><span id="sign-out-label">تسجيل الخروج</span>
-        </button>
-        <button class="theme-btn" id="theme-toggle" aria-label="تبديل المظهر" title="تبديل المظهر">
-          <span class="theme-icon-light">&#x2600;</span>
-          <span class="theme-icon-dark">&#x1F319;</span>
         </button>
       </div>
     </nav>
@@ -110,8 +112,8 @@
         </button>
         <h1 class="topbar-title" id="page-title">لوحة التحكم</h1>
         <button class="theme-btn topbar-theme" id="theme-toggle-mob" aria-label="تبديل المظهر">
-          <span class="theme-icon-light">&#x2600;</span>
-          <span class="theme-icon-dark">&#x1F319;</span>
+          <span class="theme-icon-light" aria-hidden="true">&#x1F319;</span>
+          <span class="theme-icon-dark" aria-hidden="true">&#x2600;</span>
         </button>
       </header>
 

@@ -429,7 +429,7 @@ function exampleRowHtml(label, text, credit) {
   return `
     <div class="example-row">
       <div class="example-row-head">
-        <span>${label}</span>
+        <span>${escHtml(label)}</span>
         <button class="tts-btn-inline" data-speak="${escHtml(text)}" title="نطق">🔊</button>
       </div>
       <p dir="ltr">${escHtml(text)}</p>

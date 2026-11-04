@@ -125,10 +125,10 @@ function bindCardActions(container) {
 function subjectCard(subject) {
   return `
     <div class="subject-card" data-id="${subject.id}" tabindex="0" role="button"
-         aria-label="فتح مادة ${subject.name}">
+         aria-label="فتح مادة ${escHtml(subject.name)}">
       <div class="subject-card-stripe" style="background:${subject.color || '#7C3AED'}"></div>
       <div class="subject-card-body">
-        <div class="subject-card-name">${subject.name}</div>
+        <div class="subject-card-name">${escHtml(subject.name)}</div>
         <div class="subject-card-meta">
           <span>📝 ${subject.cardCount ?? 0} بطاقة</span>
           <span>📅 ${subject.createdAt ? formatDate(subject.createdAt.slice(0,10)) : ''}</span>
