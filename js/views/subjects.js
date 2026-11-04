@@ -4,7 +4,7 @@
 
 import { subjects as subjectsDB, flashcards as cardsDB, reviewPlans as plansDB } from '../db.js';
 import {
-  uid, showToast, showConfirm, debounce,
+  uid, showToast, showConfirm, debounce, escHtml,
   SUBJECT_COLORS, randomColor, arabicCount, formatDate, todayStr, addDays,
 } from '../utils/helpers.js';
 
