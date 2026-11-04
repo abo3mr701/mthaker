@@ -6,8 +6,9 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js';
 import { getAuth } from 'https://www.gstatic.com/firebasejs/10.13.1/firebase-auth.js';
 import {
-  getFirestore,
-  enableIndexedDbPersistence,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
 } from 'https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js';
 
 const firebaseConfig = {
@@ -21,13 +22,9 @@ const firebaseConfig = {
 
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const firestore = getFirestore(app);
-
-// يسمح للتطبيق يشتغل حتى مع انقطاع بسيط بالإنترنت (يخزّن مؤقتاً محلياً
-// ويزامن تلقائياً أول ما يرجع الاتصال). يفشل بصمت في حالات نادرة (تبويبات
-// متعددة مفتوحة بنفس الوقت) — التطبيق يستمر بالعمل بدون هذي الميزة حينها.
-try {
-  enableIndexedDbPersistence(firestore);
-} catch (err) {
-  console.warn('Firestore offline persistence not enabled:', err.code || err.message);
-}
+export const firestore = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+  // Some networks interrupt the streaming WebChannel used for writes.
+  experimentalAutoDetectLongPolling: false,
+  experimentalForceLongPolling: true,
+});

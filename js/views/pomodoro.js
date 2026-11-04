@@ -1,9 +1,10 @@
 /** Study timer, progress and city. The hash stays compatible with saved links. */
 import { sessions as sessionsDB, settings } from '../db.js';
 import { auth } from '../services/firebase.js';
-import { uid, showToast, formatTimer } from '../utils/helpers.js';
+import { uid, showToast, formatTimer, escHtml } from '../utils/helpers.js';
 import { localStudyDay } from '../services/reviewPlanSchedule.js';
 import { sessionTotals, addStudySpan, studyDuration } from '../services/studyTime.js';
+import { cityScene, landmarkProgress } from './focusCity.js';
 
 const MODES = { pomodoro: 'بومودورو', countdown: 'عد تنازلي', stopwatch: 'عداد مفتوح' };
 const CITY = [
@@ -39,6 +40,7 @@ let records = [];
 let view;
 let ticker;
 let selected = 0;
+let cityTurn = 0;
 let audio;
 
 function newTimer() {
@@ -53,6 +55,7 @@ export function resetStudyTimer() {
   records = [];
   view = null;
   selected = 0;
+  cityTurn = 0;
 }
 
 function limit(state) {
@@ -196,8 +199,12 @@ export async function renderPomodoro(container) {
     <section class="card focus-city" aria-labelledby="focus-city-heading">
       <div class="focus-city-header">
         <div><h3 id="focus-city-heading">مدينة مذاكر</h3>
-          <p class="text-muted">كل دقيقة محفوظة تقرّبك من معلم جديد. اضغط أي قطعة لاكتشافها.</p></div>
+          <p class="text-muted">معالم المدينة تكبر على ثلاث مراحل حسب وقت مذاكرتك المحفوظ.</p></div>
         <span id="focus-city-count" class="category-badge"></span>
+      </div>
+      <div class="city-controls" aria-label="اتجاه الكاميرا">
+        <button type="button" class="btn btn-secondary btn-sm" id="city-left" aria-label="دوّر المدينة لليسار">↶ تدوير</button>
+        <button type="button" class="btn btn-secondary btn-sm" id="city-right" aria-label="دوّر المدينة لليمين">تدوير ↷</button>
       </div>
       <div id="focus-map" class="focus-map"></div>
       <div id="focus-place" class="focus-place" aria-live="polite"></div>
@@ -253,14 +260,24 @@ export async function renderPomodoro(container) {
       updateControls();
     }
   });
-  get('focus-map').addEventListener('click', event => {
+  function selectLot(event) {
     const tile = event.target.closest('[data-tile]');
     if (!tile) return;
     selected = Number(tile.dataset.tile);
-    get('focus-map').querySelectorAll('[data-tile]').forEach(button => {
-      button.setAttribute('aria-pressed', String(Number(button.dataset.tile) === selected));
+    paintCity(sessionTotals(records).all / 60000);
+    get('focus-map').querySelector(`[data-tile="${selected}"]`)?.focus({ preventScroll: true });
+  }
+  get('focus-map').addEventListener('click', selectLot);
+  get('focus-map').addEventListener('keydown', event => {
+    if (!event.target.closest('[data-tile]') || !['Enter', ' '].includes(event.key)) return;
+    event.preventDefault();
+    selectLot(event);
+  });
+  [['city-left', -1], ['city-right', 1]].forEach(([id, delta]) => {
+    get(id).addEventListener('click', () => {
+      cityTurn = (cityTurn + delta + 4) % 4;
+      paintCity(sessionTotals(records).all / 60000);
     });
-    paintPlace(sessionTotals(records).all / 60000);
   });
   updateControls();
   paintProgress();
@@ -281,7 +298,8 @@ function updateControls() {
   toggle.textContent = state.started !== null ? 'إيقاف مؤقت' : state.id ? 'استئناف' : 'ابدأ';
   toggle.disabled = state.saving || !!state.pending;
   const finishButton = get('focus-finish');
-  finishButton.textContent = state.pending ? 'إعادة محاولة الحفظ' : state.phase === 'break' ? 'إنهاء الراحة' : 'إنهاء وحفظ';
+  finishButton.textContent = state.saving && state.pending ? 'جارٍ حفظ الجلسة…'
+    : state.pending ? 'إعادة محاولة الحفظ' : state.phase === 'break' ? 'إنهاء الراحة' : 'إنهاء وحفظ';
   finishButton.disabled = state.saving || (!state.id && state.phase === 'study');
   get('focus-reset').disabled = !state.id || state.saving || !!state.pending;
   get('focus-mode').value = state.mode;
@@ -298,21 +316,20 @@ function paintProgress() {
   view.querySelector('#focus-stats').innerHTML = [
     ['اليوم', totals.today], ['هذا الأسبوع', totals.week], ['هذا الشهر', totals.month], ['كل الوقت', totals.all],
   ].map(([label, total]) => `<div><strong>${studyDuration(total)}</strong><span>${label}</span></div>`).join('');
-  const unlocked = CITY.filter(([goal]) => minutes >= goal).length;
-  view.querySelector('#focus-city-count').textContent = `${unlocked} / ${CITY.length} معلم`;
-  view.querySelector('#focus-map').innerHTML = CITY.map(([goal, icon, label], i) => {
-    const open = minutes >= goal;
-    return `<button type="button" class="focus-tile ${open ? 'is-open' : ''}" data-tile="${i}"
-      aria-pressed="${i === selected}" aria-label="${label}${open ? '' : '، مقفل'}">
-      <span aria-hidden="true">${open ? icon : '◇'}</span><small>${label}</small></button>`;
-  }).join('');
-  paintPlace(minutes);
+  paintCity(minutes);
 }
 
-function paintPlace(minutes) {
-  const [goal, icon, label, detail] = CITY[selected];
-  const remaining = Math.max(0, Math.ceil(goal - minutes));
-  view.querySelector('#focus-place').textContent = remaining
-    ? `🔒 ${label} · باقي ${remaining} دقيقة مذاكرة لفتحه.`
-    : `${icon} ${label} · ${detail}`;
+function paintCity(minutes) {
+  const unlocked = CITY.filter(([goal]) => minutes >= goal).length;
+  view.querySelector('#focus-city-count').textContent = `${unlocked} / ${CITY.length} معلم`;
+  view.querySelector('#focus-map').innerHTML = cityScene(CITY, minutes, selected, cityTurn, escHtml);
+  const [, icon, label, detail] = CITY[selected];
+  const progress = landmarkProgress(CITY, selected, minutes);
+  const description = progress.unlocked
+    ? `المرحلة ${progress.stage} من 3 · ${detail}`
+    : `باقي ${progress.remaining} دقيقة مذاكرة لفتحه.`;
+  view.querySelector('#focus-place').innerHTML = `
+    <strong>${progress.unlocked ? icon : '🔒'} ${escHtml(label)}</strong>
+    <span>${escHtml(description)}</span>
+    <progress max="100" value="${Math.round(progress.fraction * 100)}" aria-label="تقدّم المعلم"></progress>`;
 }
