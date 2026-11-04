@@ -331,7 +331,7 @@ function renderTodayTab(container, el) {
       <div class="study-progress-fill" style="width:${Math.round((index / total) * 100)}%"></div>
     </div>
 
-    <div class="study-scene" id="eng-scene" role="button" tabindex="0" aria-label="انقر لقلب البطاقة">
+    <div class="study-scene eng-study-scene" id="eng-scene" role="button" tabindex="0" aria-label="انقر لقلب البطاقة">
       <div class="study-card-inner" id="eng-card-inner">
         <div class="study-card-face study-card-front">
           <span class="stage-badge level-badge level-${(word.level || 'A1').toLowerCase()}">${word.level || 'A1'} · ${escHtml(word.pos || '—')}</span>
@@ -341,11 +341,11 @@ function renderTodayTab(container, el) {
         </div>
         <div class="study-card-face study-card-back">
           <p class="study-card-text" dir="rtl">${escHtml(word.ar || '—')}</p>
-          <p class="text-muted text-sm" style="margin-top:var(--s3);">${escHtml(word.definition || '')}</p>
+          <p class="text-muted text-sm" dir="ltr">${escHtml(word.definition || '')}</p>
           ${exampleRowHtml('حياة يومية', word.examples?.daily)}
           ${exampleRowHtml('أكاديمي', word.examples?.academic)}
           ${exampleRowHtml('اصطلاحي', word.examples?.idiom)}
-          <button class="btn btn-sm btn-secondary" id="eng-ask-ai" type="button" style="margin-top:var(--s4);">💬 اسأل الذكاء الاصطناعي</button>
+          <button class="btn btn-sm btn-secondary" id="eng-ask-ai" type="button">💬 اسأل الذكاء الاصطناعي</button>
         </div>
       </div>
     </div>

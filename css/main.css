@@ -1428,6 +1428,41 @@ body.sidebar-collapsed .sidebar { display: none; }
 .flashcard-item.open .deck-row-detail { display: block; }
 
 /* Example sentence rows (front/back of the English flip card) */
+.eng-study-scene {
+  height: auto;
+}
+.eng-study-scene .study-card-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  height: auto;
+}
+.eng-study-scene .study-card-face {
+  /* Both faces size the same grid cell, so long answers fit without a jump on flip. */
+  position: relative;
+  inset: auto;
+  grid-area: 1 / 1;
+  min-width: 0;
+  min-height: 320px;
+  padding: clamp(20px, 4vw, 40px);
+  gap: var(--s4);
+  overflow-wrap: anywhere;
+}
+.eng-study-scene .study-card-front .study-card-text {
+  font-size: clamp(1.6rem, 4vw, 2.4rem);
+}
+.eng-study-scene .study-card-back {
+  align-items: stretch;
+}
+.eng-study-scene .example-row {
+  width: 100%;
+  min-width: 0;
+  margin-top: 0;
+}
+.eng-study-scene #eng-ask-ai {
+  align-self: center;
+  max-width: 100%;
+  white-space: normal;
+}
 .example-row { background: var(--surface-alt); border: 1px solid var(--border); border-radius: var(--r3); padding: var(--s3) var(--s4); margin-top: var(--s3); text-align: start; }
 .example-row-head { display: flex; justify-content: space-between; align-items: center; font-size: .7rem; text-transform: uppercase; letter-spacing: .03em; color: var(--text3); font-weight: 700; margin-bottom: var(--s2); }
 .example-row p { font-size: .85rem; color: var(--text2); line-height: 1.6; }
