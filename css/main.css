@@ -1479,6 +1479,23 @@ body.sidebar-collapsed .sidebar { display: none; }
 @media (max-width: 560px) { .rate-grid { grid-template-columns: repeat(2, 1fr); } }
 
 /* Import checklist (استيراد كلمات من ملف/صورة) */
+.eng-catalog-controls { display:flex; flex-wrap:wrap; gap:var(--s5); align-items:end; margin-bottom:var(--s5); }
+.eng-catalog-controls > label { display:flex; flex-direction:column; gap:var(--s2); flex:1 1 220px; min-width:0; }
+.eng-catalog-controls > .eng-catalog-new { flex:0 1 auto; flex-direction:row; align-items:center; padding:var(--s4) 0; }
+.eng-catalog-actions { display:flex; flex-wrap:wrap; gap:var(--s3); margin-bottom:var(--s5); }
+.eng-catalog-grid { margin-top:var(--s5); }
+.eng-catalog-item { display:flex; flex-direction:column; gap:var(--s3); min-width:0; overflow-wrap:anywhere; }
+.eng-catalog-word { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:var(--s3); }
+.eng-catalog-word h3 { min-width:0; }
+.eng-catalog-pick { display:flex; gap:var(--s3); align-items:center; margin-top:auto; padding-top:var(--s3); }
+.eng-catalog-item details { color:var(--text2); font-size:.85rem; }
+.eng-catalog-item summary { cursor:pointer; color:var(--primary); padding:var(--s2) 0; }
+.eng-catalog-item details p { margin-top:var(--s3); text-align:start; }
+.eng-catalog-pages { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:var(--s4); margin-top:var(--s6); }
+.eng-catalog-sources { margin-top:var(--s6); line-height:1.8; }
+.eng-catalog-sources a, .eng-example-credit { color:var(--primary); text-decoration:underline; }
+.eng-example-credit { display:block; font-size:.7rem; margin-top:var(--s2); overflow-wrap:anywhere; }
+
 .import-checklist {
   max-height: 260px; overflow-y: auto;
   border: 1px solid var(--border); border-radius: var(--r3);

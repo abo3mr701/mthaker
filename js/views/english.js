@@ -7,10 +7,12 @@
  * المراجعة") — بدون أي ثيم منفصل.
  */
 
-import { oxfordWords } from '../data/oxfordWords.js';
+import { oxfordWords, legacyOxfordWords } from '../data/oxfordWords.js';
 import { englishCards as cardsDB, englishWords as customWordsDB, settings } from '../db.js';
 import { createNewCard, applyRating, isDue, forecastLabel, RATINGS } from '../services/englishSrs.js';
 import { generateDailyQueue, buildReviewQueue } from '../services/englishQueue.js';
+import { mergeVocabulary, normalizeWord, activeWordKeys } from '../services/englishVocabulary.js';
+import { renderEnglishCatalog, creditHtml } from './englishCatalog.js';
 import { generateEnglishWordEntry, askAboutWord, extractEnglishWordList, extractTextFromImage } from '../services/gemini.js';
 import { extractFileContent, needsVisionOCR, validateFile } from '../services/extractor.js';
 import { uid, showToast, escHtml, todayStr } from '../utils/helpers.js';
@@ -68,17 +70,17 @@ async function loadState() {
 
   const seenArr = await settings.get(SETTINGS_KEYS.SEEN);
 
-  const wordBank = [...oxfordWords, ...customWords];
-  const wordById = new Map(wordBank.map(w => [w.id, w]));
   const cardsById = {};
   allCards.forEach(c => { cardsById[c.id] = c; });
+  const wordBank = mergeVocabulary(dictionaryWords(cardsById), customWords, cardsById);
+  const wordById = new Map(wordBank.map(w => [w.id, w]));
 
   S = {
     wordBank,
     wordById,
     customWords,
     cards: cardsById,
-    seenIds: new Set(Array.isArray(seenArr) ? seenArr : []),
+    seenIds: new Set([...(Array.isArray(seenArr) ? seenArr : []), ...Object.keys(cardsById)]),
     queue: queue || { date: null, wordIds: [] },
     stats: stats || { ...DEFAULT_STATS },
     dailyTarget: target || DEFAULT_TARGET,
@@ -96,6 +98,10 @@ async function persistState() {
     settings.set(SETTINGS_KEYS.SEEN, Array.from(S.seenIds)),
     settings.set(SETTINGS_KEYS.TARGET, S.dailyTarget),
   ]);
+}
+
+function dictionaryWords(cards) {
+  return [...oxfordWords, ...legacyOxfordWords.filter(word => cards[word.id])];
 }
 
 function touchStreak() {
@@ -119,7 +125,7 @@ async function ensureTodayQueue() {
   touchStreak();
   if (S.queue.date === today) return;
 
-  const result = generateDailyQueue(oxfordWords.concat(S.customWords), S.seenIds, S.dailyTarget, { min: 0.6, max: 0.7 });
+  const result = generateDailyQueue(S.wordBank, S.seenIds, S.dailyTarget, { min: 0.6, max: 0.7 });
 
   if (result.selected.length === 0) {
     S.queue = { date: today, wordIds: [] };
@@ -144,7 +150,7 @@ function paint(container) {
     <div class="page-hd">
       <div class="page-hd-text">
         <h2>الإنجليزية</h2>
-        <p>Oxford 3000 · نظام تكرار متباعد بأسلوب Anki — 🔥 ${S.stats.streak} يوم متتالي</p>
+        <p>Oxford 5000 · نظام تكرار متباعد بأسلوب Anki — 🔥 ${S.stats.streak} يوم متتالي</p>
       </div>
     </div>
 
@@ -152,6 +158,7 @@ function paint(container) {
       <button class="tab-btn ${S.activeTab === 'dashboard' ? 'active' : ''}" data-tab="dashboard">📊 لوحة التحكم</button>
       <button class="tab-btn ${S.activeTab === 'today' ? 'active' : ''}" data-tab="today">🎯 كلمات اليوم${dueCount ? ` (${dueCount})` : ''}</button>
       <button class="tab-btn ${S.activeTab === 'mydeck' ? 'active' : ''}" data-tab="mydeck">📚 مفرداتي</button>
+      <button class="tab-btn ${S.activeTab === 'catalog' ? 'active' : ''}" data-tab="catalog">📖 معجم Oxford</button>
     </div>
 
     <div id="eng-content" style="margin-top:var(--s7);"></div>
@@ -168,6 +175,7 @@ function paint(container) {
   const content = container.querySelector('#eng-content');
   if (S.activeTab === 'today') renderTodayTab(container, content);
   else if (S.activeTab === 'mydeck') renderMyDeckTab(container, content);
+  else if (S.activeTab === 'catalog') renderCatalogTab(container, content);
   else renderDashboardTab(container, content);
 }
 
@@ -342,9 +350,9 @@ function renderTodayTab(container, el) {
         <div class="study-card-face study-card-back">
           <p class="study-card-text" dir="rtl">${escHtml(word.ar || '—')}</p>
           <p class="text-muted text-sm" dir="ltr">${escHtml(word.definition || '')}</p>
-          ${exampleRowHtml('حياة يومية', word.examples?.daily)}
-          ${exampleRowHtml('أكاديمي', word.examples?.academic)}
-          ${exampleRowHtml('اصطلاحي', word.examples?.idiom)}
+          ${exampleRowHtml(word.exampleLabels?.[0] || 'حياة يومية', word.examples?.daily, word.exampleCredits?.[0])}
+          ${exampleRowHtml(word.exampleLabels?.[1] || 'أكاديمي', word.examples?.academic, word.exampleCredits?.[1])}
+          ${exampleRowHtml(word.exampleLabels?.[2] || 'اصطلاحي', word.examples?.idiom, word.exampleCredits?.[2])}
           <button class="btn btn-sm btn-secondary" id="eng-ask-ai" type="button">💬 اسأل الذكاء الاصطناعي</button>
         </div>
       </div>
@@ -361,7 +369,7 @@ function renderTodayTab(container, el) {
   bindFlashcard(container, el, word);
 }
 
-function exampleRowHtml(label, text) {
+function exampleRowHtml(label, text, credit) {
   if (!text) return '';
   return `
     <div class="example-row">
@@ -370,6 +378,7 @@ function exampleRowHtml(label, text) {
         <button class="tts-btn-inline" data-speak="${escHtml(text)}" title="نطق">🔊</button>
       </div>
       <p dir="ltr">${escHtml(text)}</p>
+      ${creditHtml(credit)}
     </div>
   `;
 }
@@ -483,6 +492,47 @@ function openAskAiModal(word) {
 }
 
 /* ─── "مفرداتي" tab — فلاتر المستوى (قابلة للضغط) + الحالة + بحث ─────── */
+function renderCatalogTab(container, el) {
+  renderEnglishCatalog(el, {
+    words: S.wordBank.filter(word => word.isOxford),
+    cards: S.cards,
+    onAdd: async words => {
+      const added = await activateCatalogWords(words);
+      const dueCount = Object.values(S.cards).filter(card => isDue(card)).length;
+      const todayTab = container.querySelector('[data-tab="today"]');
+      if (todayTab) todayTab.textContent = `🎯 كلمات اليوم${dueCount ? ` (${dueCount})` : ''}`;
+      return added;
+    },
+  });
+}
+
+async function activateCatalogWords(words) {
+  let added = 0;
+  const known = activeWordKeys(S.wordBank, S.cards);
+  const candidates = words.filter(word => {
+    const key = normalizeWord(word.word);
+    if (S.cards[word.id] || known.has(key)) return false;
+    known.add(key);
+    return true;
+  });
+  // Persist only SRS records; shared dictionary content stays bundled in the app.
+  for (let i = 0; i < candidates.length; i += 100) {
+    const cards = candidates.slice(i, i + 100).map(word => createNewCard(word.id));
+    await cardsDB.bulkSave(cards);
+    if (S.queue.date !== todayStr()) S.queue = { date: todayStr(), wordIds: [] };
+    cards.forEach(card => {
+      S.cards[card.id] = card;
+      S.seenIds.add(card.id);
+      if (!S.queue.wordIds.includes(card.id)) S.queue.wordIds.push(card.id);
+    });
+    added += cards.length;
+  }
+  try { await persistState(); } catch {
+    showToast('تم حفظ الكلمات، لكن تعذّر تحديث إعدادات اليوم. ستظهر الكلمات بعد إعادة التحميل.', 'warning');
+  }
+  return added;
+}
+
 function renderMyDeckTab(container, el) {
   const entries = S.wordBank
     .filter(w => S.cards[w.id])
@@ -664,13 +714,14 @@ function openAddWordModal(container) {
   bodyEl.querySelector('#w-ai-btn').addEventListener('click', async () => {
     const word = bodyEl.querySelector('#w-word').value.trim();
     if (!word) { showToast('اكتب الكلمة أولاً', 'warning'); return; }
-    const apiKey = await settings.get('geminiApiKey');
-    if (!apiKey) { showToast('أدخل مفتاح Gemini API في الإعدادات أولاً', 'warning', 5000); return; }
+    const bundled = S.wordBank.find(entry => entry.isOxford && normalizeWord(entry.word) === normalizeWord(word));
+    const apiKey = bundled ? '' : await settings.get('geminiApiKey');
+    if (!bundled && !apiKey) { showToast('أدخل مفتاح Gemini API في الإعدادات أولاً', 'warning', 5000); return; }
 
     const btn = bodyEl.querySelector('#w-ai-btn');
     btn.disabled = true; const original = btn.textContent; btn.textContent = '⏳ جاري التوليد…';
     try {
-      const entry = await generateEnglishWordEntry(apiKey, word);
+      const entry = bundled || await generateEnglishWordEntry(apiKey, word);
       bodyEl.querySelector('#w-level').value = entry.level;
       bodyEl.querySelector('#w-pos').value = entry.pos;
       bodyEl.querySelector('#w-ar').value = entry.ar;
@@ -678,7 +729,7 @@ function openAddWordModal(container) {
       bodyEl.querySelector('#w-ex-daily').value = entry.examples.daily;
       bodyEl.querySelector('#w-ex-academic').value = entry.examples.academic;
       bodyEl.querySelector('#w-ex-idiom').value = entry.examples.idiom;
-      showToast('تم التوليد بنجاح ✨', 'success');
+      showToast(bundled ? 'تمت تعبئة البيانات من المعجم بدون استخدام API' : 'تم التوليد بنجاح ✨', 'success');
     } catch (err) {
       showToast(err.message, 'error', 6000);
     } finally {
@@ -703,7 +754,10 @@ function openAddWordModal(container) {
       },
     });
 
-    await addWordToDeck(newWord);
+    if (!await addWordToDeck(newWord)) {
+      showToast('الكلمة موجودة في مفرداتك بالفعل', 'info');
+      return;
+    }
     close();
     paint(container);
     showToast('تمت إضافة الكلمة إلى مفرداتك', 'success');
@@ -719,14 +773,15 @@ function buildCustomWord({ word, pos, level, ar, definition, examples }) {
 }
 
 async function addWordToDeck(newWord) {
+  if (activeWordKeys(S.wordBank, S.cards).has(normalizeWord(newWord.word))) return false;
   await customWordsDB.save(newWord);
   const card = createNewCard(newWord.id);
   await cardsDB.save(card);
 
   S.customWords.push(newWord);
-  S.wordBank.push(newWord);
-  S.wordById.set(newWord.id, newWord);
   S.cards[newWord.id] = card;
+  S.wordBank = mergeVocabulary(dictionaryWords(S.cards), S.customWords, S.cards);
+  S.wordById = new Map(S.wordBank.map(word => [word.id, word]));
   S.seenIds.add(newWord.id);
 
   // Bug fix: a word you add yourself should show up in "كلمات اليوم" right
@@ -741,6 +796,7 @@ async function addWordToDeck(newWord) {
   }
 
   await persistState();
+  return true;
 }
 
 /* ─── Import candidate words from an uploaded file/image ──────────
@@ -866,20 +922,26 @@ function renderImportChecklist(container, bodyEl, resultsEl, words) {
     const progressEl = resultsEl.querySelector('#imp-progress');
     btn.disabled = true;
 
-    let done = 0;
+    let done = 0, added = 0;
     for (const word of selected) {
       progressEl.textContent = `⏳ جاري الإضافة… (${++done}/${selected.length}) ${word}`;
+      if (activeWordKeys(S.wordBank, S.cards).has(normalizeWord(word))) continue;
+      const bundled = S.wordBank.find(entry => entry.isOxford && normalizeWord(entry.word) === normalizeWord(word));
+      if (bundled) {
+        added += await activateCatalogWords([bundled]);
+        continue;
+      }
       try {
         const entry = await generateEnglishWordEntry(apiKey, word);
-        await addWordToDeck(buildCustomWord({ word, ...entry }));
+        if (await addWordToDeck(buildCustomWord({ word, ...entry }))) added++;
       } catch {
         // Fallback: add with minimal info if AI enrichment fails for this word
-        await addWordToDeck(buildCustomWord({ word, pos: '', level: 'A1', ar: '', definition: '', examples: {} }));
+        if (await addWordToDeck(buildCustomWord({ word, pos: '', level: 'A1', ar: '', definition: '', examples: {} }))) added++;
       }
     }
 
-    progressEl.textContent = `✅ تمت إضافة ${selected.length} كلمة.`;
-    showToast(`تمت إضافة ${selected.length} كلمة إلى مفرداتك`, 'success');
+    progressEl.textContent = `✅ تمت إضافة ${added} كلمة جديدة؛ تم تجاوز الكلمات الموجودة.`;
+    showToast(`تمت إضافة ${added} كلمة إلى مفرداتك`, 'success');
     btn.disabled = false;
     setTimeout(() => {
       document.getElementById('modal-form').classList.add('hidden');

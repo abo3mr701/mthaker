@@ -1,6 +1,38 @@
-// English vocabulary dataset for قسم "الإنجليزية".
-// يبدأ فاضياً بالكامل بناءً على طلبك — كل كلمة تضيفها (يدوياً، بالذكاء
-// الاصطناعي، أو عبر استيراد ملف/صورة) تُخزَّن في مخزن منفصل (english_custom_words)
-// وتُدمج تلقائياً مع هذه القائمة. رصيد الكلمات يبدأ من صفر ويزيد مع كل كلمة.
-
-export const oxfordWords = [];
+// Oxford 5000 headwords, bundled for offline use. See VOCABULARY-SOURCES.md.
+import p0 from './oxford/part-01.js';
+import p150 from './oxford/part-02.js';
+import p300 from './oxford/part-03.js';
+import p450 from './oxford/part-04.js';
+import p600 from './oxford/part-05.js';
+import p750 from './oxford/part-06.js';
+import p900 from './oxford/part-07.js';
+import p1050 from './oxford/part-08.js';
+import p1200 from './oxford/part-09.js';
+import p1350 from './oxford/part-10.js';
+import p1500 from './oxford/part-11.js';
+import p1650 from './oxford/part-12.js';
+import p1800 from './oxford/part-13.js';
+import p1950 from './oxford/part-14.js';
+import p2100 from './oxford/part-15.js';
+import p2250 from './oxford/part-16.js';
+import p2400 from './oxford/part-17.js';
+import p2550 from './oxford/part-18.js';
+import p2700 from './oxford/part-19.js';
+import p2850 from './oxford/part-20.js';
+import p3000 from './oxford/part-21.js';
+import p3150 from './oxford/part-22.js';
+import p3300 from './oxford/part-23.js';
+import p3450 from './oxford/part-24.js';
+import p3600 from './oxford/part-25.js';
+import p3750 from './oxford/part-26.js';
+import p3900 from './oxford/part-27.js';
+import p4050 from './oxford/part-28.js';
+import p4200 from './oxford/part-29.js';
+import p4350 from './oxford/part-30.js';
+import p4500 from './oxford/part-31.js';
+import p4650 from './oxford/part-32.js';
+import p4800 from './oxford/part-33.js';
+import p4950 from './oxford/part-34.js';
+export const oxfordWords = [...p0,...p150,...p300,...p450,...p600,...p750,...p900,...p1050,...p1200,...p1350,...p1500,...p1650,...p1800,...p1950,...p2100,...p2250,...p2400,...p2550,...p2700,...p2850,...p3000,...p3150,...p3300,...p3450,...p3600,...p3750,...p3900,...p4050,...p4200,...p4350,...p4500,...p4650,...p4800,...p4950];
+// Restore metadata for any still-active older US-spelling cards without resetting them.
+export const legacyOxfordWords = [{"id":"ox-0091","word":"neighborhood","pos":"n.","level":"A1","ar":"حي / جوار","definition":"a district or area within a town or city","examples":{"daily":"We live in a quiet neighborhood.","academic":"The study compared crime rates across neighborhoods.","idiom":"It takes a village, or at least a good neighborhood."}},{"id":"ox-0139","word":"theater","pos":"n.","level":"A1","ar":"مسرح","definition":"a building where plays and performances are shown","examples":{"daily":"We watched a play at the theater.","academic":"The university's theater department stages four shows a year.","idiom":"All the world's a stage, and life's a theater."}},{"id":"ox-0166","word":"anymore","pos":"adv.","level":"A2","ar":"بعد الآن","definition":"from now on; any longer (used in negatives)","examples":{"daily":"I don't live here anymore.","academic":"The old method is not used anymore in modern labs.","idiom":"Things just aren't the same anymore."}},{"id":"ox-0253","word":"sneaker","pos":"n.","level":"A2","ar":"حذاء رياضي","definition":"a soft, comfortable sports shoe","examples":{"daily":"I bought new sneakers for running.","academic":"The study tested sneaker cushioning on impact force.","idiom":"Walk a mile in someone's sneakers before judging them."}},{"id":"ox-0288","word":"corn","pos":"n.","level":"B1","ar":"ذرة","definition":"a tall plant grown for its yellow grains, used as food","examples":{"daily":"We grilled fresh corn for dinner.","academic":"Corn yield increased with the new fertilizer.","idiom":"That joke was so corny it hurt."}}];

@@ -19,7 +19,6 @@ import { renderSubjects }      from './views/subjects.js';
 import { renderSubjectDetail } from './views/subject-detail.js';
 import { renderStudy }         from './views/study.js';
 import { renderReviews }       from './views/reviews.js';
-import { renderEnglish }       from './views/english.js';
 import { renderPomodoro }      from './views/pomodoro.js';
 import { renderSettings }      from './views/settings.js';
 import { renderChat }          from './views/chat.js';
@@ -210,8 +209,12 @@ async function renderView(viewName, container, params) {
     case 'reviews':
       return renderReviews(container);
 
-    case 'english':
+    case 'english': {
+      // Load the shared dictionary only when the English section is opened.
+      const { renderEnglish } = await import('./views/english.js');
+      if (window.location.hash.replace('#', '') !== 'english') return;
       return renderEnglish(container);
+    }
 
     case 'pomodoro':
       return renderPomodoro(container);
