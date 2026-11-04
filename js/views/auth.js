@@ -16,7 +16,7 @@ export function renderAuthScreen(container) {
   container.innerHTML = `
     <div class="auth-card">
       <div class="auth-brand">
-        <span class="brand-glyph">م</span>
+        <img class="brand-glyph" src="assets/mthaker-logo.svg" alt="" width="40" height="40">
         <span class="auth-brand-name">مذاكر</span>
       </div>
       <p class="auth-tagline">سجّل دخولك عشان بياناتك تتزامن على كل أجهزتك</p>

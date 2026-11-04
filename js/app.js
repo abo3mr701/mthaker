@@ -10,7 +10,7 @@
  */
 
 import { dbReady, settings as settingsDB } from './db.js';
-import { watchAuthState, signOutUser, getCurrentUser } from './services/authService.js';
+import { watchAuthState, signOutUser } from './services/authService.js';
 import { renderAuthScreen } from './views/auth.js';
 import { showConfirm } from './utils/helpers.js';
 
@@ -112,13 +112,7 @@ async function startApp() {
 }
 
 function setupSignOut() {
-  const btn   = document.getElementById('sign-out-btn');
-  const label = document.getElementById('sign-out-label');
-  const user  = getCurrentUser();
-  if (label && user) {
-    const who = user.displayName || user.email || user.phoneNumber || '';
-    label.textContent = who ? `تسجيل الخروج (${who})` : 'تسجيل الخروج';
-  }
+  const btn = document.getElementById('sign-out-btn');
   btn?.addEventListener('click', async () => {
     const ok = await showConfirm('تسجيل الخروج', 'هل تريد تسجيل الخروج من حسابك على هذا الجهاز؟');
     if (!ok) return;
@@ -158,7 +152,6 @@ async function route() {
   // Update page title (topbar + document)
   const titleEl = document.getElementById('page-title');
   if (titleEl) titleEl.textContent = matched.title;
-  document.title = `${matched.title} — مذاكر`;
 
   // Animate view out, render, animate in
   viewEl.style.opacity   = '0';
