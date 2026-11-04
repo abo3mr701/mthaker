@@ -3,7 +3,7 @@ import { sessions as sessionsDB, settings } from '../db.js';
 import { auth } from '../services/firebase.js';
 import { uid, showToast, formatTimer, escHtml } from '../utils/helpers.js';
 import { localStudyDay } from '../services/reviewPlanSchedule.js';
-import { sessionTotals, addStudySpan, studyDuration } from '../services/studyTime.js';
+import { sessionTotals, addStudySpan, studyDuration, projectStudyTotals, creditStudyProject } from '../services/studyTime.js';
 import { cityScene, landmarkProgress, CITY_FRAME } from './focusCity.js';
 import { CITY_WORLDS } from './cityWorlds.js';
 
@@ -18,11 +18,14 @@ let cityTurn = 0;
 let worldId = 'riyadh';
 let cameraBox = [...CITY_FRAME];
 let cityLocations = [];
+let cityPaintKey = '';
+let citySecond = 0;
+let savedProjects = {};
 let audio;
 
 function newTimer() {
   return { mode: 'pomodoro', phase: 'study', study: 25, rest: 5, countdown: 30,
-    elapsed: 0, started: null, id: null, days: {}, pending: null, saving: false };
+    elapsed: 0, started: null, id: null, days: {}, projects: {}, pending: null, saving: false };
 }
 
 export function resetStudyTimer() {
@@ -35,6 +38,12 @@ export function resetStudyTimer() {
   cityTurn = 0;
   worldId = 'riyadh';
   cameraBox = [...CITY_FRAME];
+  cityPaintKey = '';
+  savedProjects = {};
+}
+
+function activeProject() {
+  return CITY_WORLDS[worldId].landmarks[selected]?.[7] || null;
 }
 
 function limit(state) {
@@ -50,13 +59,17 @@ function elapsed(state, now = Date.now()) {
 function pause(state, now = Date.now()) {
   if (state.started === null) return;
   const total = elapsed(state, now);
-  if (state.phase === 'study') addStudySpan(state.days, state.started, state.started + total - state.elapsed);
+  if (state.phase === 'study') {
+    const span = total - state.elapsed;
+    addStudySpan(state.days, state.started, state.started + span);
+    creditStudyProject(state.projects, activeProject(), span);
+  }
   state.elapsed = total;
   state.started = null;
 }
 
 function clearPhase(state, phase = 'study') {
-  Object.assign(state, { phase, elapsed: 0, started: null, id: null, firstStart: null, days: {}, pending: null });
+  Object.assign(state, { phase, elapsed: 0, started: null, id: null, firstStart: null, days: {}, projects: {}, pending: null });
 }
 
 function start(state) {
@@ -71,7 +84,14 @@ async function tick() {
   const state = timer;
   if (!state || state.started === null) return;
   if (elapsed(state) >= limit(state)) await finish(state, true);
-  else updateControls();
+  else {
+    updateControls();
+    const second = Math.floor(Date.now() / 1000);
+    if (worldId === 'riyadh' && state.phase === 'study' && second !== citySecond) {
+      citySecond = second;
+      refreshCity();
+    }
+  }
 }
 
 async function finish(state, automatic = false) {
@@ -82,7 +102,7 @@ async function finish(state, automatic = false) {
   if (state.phase === 'study' && state.elapsed > 0) {
     state.pending ??= {
       id: state.id, date: localStudyDay(new Date(state.firstStart)),
-      mode: state.mode, completed: true, durationMs: state.elapsed, studyByDay: state.days,
+      mode: state.mode, completed: true, durationMs: state.elapsed, studyByDay: state.days, cityStudyMs: state.projects,
       startedAt: new Date(state.firstStart).toISOString(), endedAt: new Date().toISOString(),
     };
     state.saving = true;
@@ -91,6 +111,7 @@ async function finish(state, automatic = false) {
       await sessionsDB.save(state.pending);
       if (timer !== state) return;
       records = [...records.filter(row => row.id !== state.id), state.pending];
+      savedProjects = projectStudyTotals(records);
       showToast('تم تسجيل وقت المذاكرة.', 'success');
     } catch {
       if (timer === state) showToast('تعذّر الحفظ. اضغط «إعادة محاولة الحفظ».', 'error');
@@ -135,12 +156,14 @@ export async function renderPomodoro(container) {
   ]);
   if (timer !== state) return;
   records = [...new Map([...sessions, ...records].map(row => [row.id, row])).values()];
+  savedProjects = projectStudyTotals(records);
   if (!state.id) {
     state.study = study || 25;
     state.rest = rest || 5;
     state.countdown = countdown || 30;
   }
   view = container;
+  cityPaintKey = '';
   container.innerHTML = `
     <div class="page-hd"><div class="page-hd-text"><h2>مؤقت المذاكرة</h2>
     <p>اختر طريقة التركيز وشاهد مدينتك تكبر مع كل جلسة.</p></div></div>
@@ -153,6 +176,7 @@ export async function renderPomodoro(container) {
         <div class="focus-clock">
           <strong id="focus-time" dir="ltr"></strong>
           <span id="focus-phase"></span>
+          <span id="focus-project" class="text-xs"></span>
         </div>
         <div class="flex gap-2 wrap focus-actions">
           <button class="btn btn-primary" id="focus-toggle"></button>
@@ -196,7 +220,7 @@ export async function renderPomodoro(container) {
       </div>
       <div id="focus-map" class="focus-map"></div>
       <p class="text-muted text-xs city-help">اسحب الخريطة للتنقل عند التقريب. المجسّم مستوحى من المعالم الحقيقية بمواقع تقريبية. <a id="city-source" target="_blank" rel="noopener noreferrer">مصدر المعالم ↗</a></p>
-      <div id="focus-place" class="focus-place" aria-live="polite"></div>
+      <div id="focus-place" class="focus-place"></div>
     </section>`;
 
   const get = id => container.querySelector('#' + id);
@@ -219,12 +243,14 @@ export async function renderPomodoro(container) {
       start(state);
     }
     updateControls();
+    refreshCity();
   });
   get('focus-finish').addEventListener('click', () => finish(state));
   get('focus-reset').addEventListener('click', () => {
     clearInterval(ticker);
     clearPhase(state);
     updateControls();
+    refreshCity();
   });
   get('focus-options').addEventListener('submit', async event => {
     event.preventDefault();
@@ -265,6 +291,9 @@ function updateControls() {
   const display = hours ? hours + ':' + formatTimer(seconds % 3600) : formatTimer(seconds);
   if (get('focus-time').textContent !== display) get('focus-time').textContent = display;
   get('focus-phase').textContent = state.phase === 'break' ? '☕ وقت الراحة' : '🎓 وقت المذاكرة';
+  const project = activeProject() && state.phase === 'study' ? CITY_WORLDS.riyadh.landmarks[selected] : null;
+  const projectLabel = project ? `مشروع الجلسة: ${project[2]}` : '';
+  if (get('focus-project').textContent !== projectLabel) get('focus-project').textContent = projectLabel;
   const toggle = get('focus-toggle');
   toggle.textContent = state.started !== null ? 'إيقاف مؤقت' : state.id ? 'استئناف' : 'ابدأ';
   toggle.disabled = state.saving || !!state.pending;
@@ -292,13 +321,22 @@ function paintProgress() {
 
 function bindCity(get) {
   const map = get('focus-map');
-  const redraw = () => paintCity(sessionTotals(records).all / 60000);
-  const changeLot = index => { selected = index; redraw(); };
+  const redraw = refreshCity;
+  function switchProject(nextWorld, index) {
+    const now = Date.now();
+    const running = timer.started !== null && timer.phase === 'study';
+    if (running) pause(timer, now);
+    worldId = nextWorld;
+    selected = index;
+    if (running) timer.started = now;
+    updateControls();
+    redraw();
+  }
+  const changeLot = index => switchProject(worldId, index);
   get('city-world').addEventListener('change', event => {
-    worldId = event.target.value;
     cityTurn = 0;
     cameraBox = [...CITY_FRAME];
-    changeLot(0);
+    switchProject(event.target.value, 0);
   });
   get('city-landmark').addEventListener('change', event => changeLot(Number(event.target.value)));
   get('city-visit').addEventListener('click', () => zoomCity(4, cityLocations[selected]));
@@ -363,31 +401,53 @@ function applyCamera() {
   map.classList.toggle('is-zoomed', width < CITY_FRAME[2]);
 }
 
+function refreshCity() {
+  if (view?.querySelector('#focus-map')) paintCity(sessionTotals(records).all / 60000);
+}
+
 function paintCity(minutes) {
   const world = CITY_WORLDS[worldId];
   const landmarks = world.landmarks;
-  const unlocked = landmarks.filter(([goal]) => minutes >= goal).length;
+  const projects = { ...savedProjects };
+  for (const [id, duration] of Object.entries(timer.projects)) creditStudyProject(projects, id, duration);
+  if (timer.started !== null && timer.phase === 'study') {
+    creditStudyProject(projects, activeProject(), elapsed(timer) - timer.elapsed);
+  }
+  const progressByLot = landmarks.map((_, index) => landmarkProgress(landmarks, index, minutes, projects));
+  const unlocked = progressByLot.filter(progress => progress.complete).length;
   view.querySelector('#city-world').value = worldId;
   view.querySelector('#city-description').textContent = world.description;
   view.querySelector('#city-source').href = world.source;
-  view.querySelector('#focus-city-count').textContent = `${unlocked} / ${landmarks.length} معلم`;
+  view.querySelector('#focus-city-count').textContent = `المكتمل: ${unlocked} من ${landmarks.length}`;
   const picker = view.querySelector('#city-landmark');
   if (picker.dataset.world !== worldId) {
     picker.innerHTML = landmarks.map(([, , label], index) => `<option value="${index}">${escHtml(label)}</option>`).join('');
     picker.dataset.world = worldId;
   }
   picker.value = String(selected);
-  const { svg, locations } = cityScene(world, minutes, selected, cityTurn, escHtml);
-  cityLocations = locations;
-  view.querySelector('#focus-map').innerHTML = svg;
-  applyCamera();
-  const [, icon, label, detail] = landmarks[selected];
-  const progress = landmarkProgress(landmarks, selected, minutes);
-  const description = progress.unlocked
-    ? `المرحلة ${progress.stage} من 3 · ${detail}`
-    : `باقي ${progress.remaining} دقيقة مذاكرة لفتحه.`;
-  view.querySelector('#focus-place').innerHTML = `
-    <strong>${progress.unlocked ? icon : '🔒'} ${escHtml(label)}</strong>
-    <span>${escHtml(description)}</span>
-    <progress max="100" value="${Math.round(progress.fraction * 100)}" aria-label="تقدّم المعلم"></progress>`;
+  const signature = [worldId, selected, cityTurn, ...progressByLot.map(p => `${p.unlocked}:${p.stage}`)].join('|');
+  const map = view.querySelector('#focus-map');
+  if (signature !== cityPaintKey) {
+    const { svg, locations } = cityScene(world, minutes, selected, cityTurn, escHtml, projects, activeProject());
+    cityLocations = locations;
+    map.innerHTML = svg;
+    cityPaintKey = signature;
+    applyCamera();
+  }
+  map.classList.toggle('is-building', worldId !== 'riyadh' || (timer.phase === 'study' && timer.started !== null));
+  const [goal, icon, label, detail, , , , project] = landmarks[selected];
+  const progress = progressByLot[selected];
+  const task = progress.fraction < .12 ? 'تجهيز الموقع' : progress.fraction < .35 ? 'الأساسات'
+    : progress.fraction < .7 ? 'البناء الرئيسي' : 'التشطيب';
+  const description = project
+    ? `${progress.complete ? 'اكتمل المشروع' : `${task} · المرحلة ${progress.stage + 1} من ${progress.stages}`} · ${studyDuration(progress.remaining * 60000)} متبقية من ${studyDuration(goal * 60000)} · ${detail}`
+    : progress.unlocked ? `المرحلة ${progress.stage} من 3 · ${detail}` : `باقي ${progress.remaining} دقيقة مذاكرة لفتحه.`;
+  const place = view.querySelector('#focus-place');
+  const markup = `<strong>${icon} ${escHtml(label)}</strong><span>${escHtml(description)}</span>
+    <progress max="1" value="${progress.fraction}" aria-label="تقدّم المعلم"></progress>
+    ${project ? `<small>وقت العمل: <bdi>${formatTimer(Math.floor(progress.spent * 60))}</bdi> · احفظ الجلسة لتثبيت التقدم.</small>` : ''}`;
+  if (place.dataset.markup !== markup) {
+    place.innerHTML = markup;
+    place.dataset.markup = markup;
+  }
 }

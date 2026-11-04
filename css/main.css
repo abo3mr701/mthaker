@@ -1630,6 +1630,7 @@ body.sidebar-collapsed .sidebar { display: none; }
 .city-worker-alt { animation-delay:-1.2s; }
 .city-seed { transform-box:fill-box; transform-origin:center bottom; animation:city-seed 2.4s ease-in-out infinite; }
 .city-crane-hook { animation:city-hook 2.8s ease-in-out infinite alternate; }
+.focus-map:not(.is-building) :is(.city-worker,.city-seed,.city-crane-hook) { animation-play-state:paused; }
 @keyframes city-worker { 0% { transform:translate(0,0); } 55% { transform:translate(6px,2px); } 100% { transform:translate(9px,1px) rotate(8deg); } }
 @keyframes city-seed { 0%,20% { transform:scale(.45); } 75%,100% { transform:scale(1.1); } }
 @keyframes city-hook { from { transform:translateY(0); } to { transform:translateY(7px); } }

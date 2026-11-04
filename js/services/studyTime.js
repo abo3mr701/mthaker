@@ -1,5 +1,21 @@
 import { localStudyDay } from './reviewPlanSchedule.js';
 
+export function projectStudyTotals(sessions) {
+  const totals = Object.create(null);
+  for (const session of sessions) {
+    if (!session.completed || session.mode === 'break') continue;
+    for (const [id, value] of Object.entries(session.cityStudyMs || {})) {
+      if (!/^[a-z0-9-]+$/.test(id) || !Number.isFinite(value) || value <= 0) continue;
+      totals[id] = (totals[id] || 0) + value;
+    }
+  }
+  return totals;
+}
+
+export function creditStudyProject(totals, project, duration) {
+  if (project && duration > 0) totals[project] = (totals[project] || 0) + duration;
+}
+
 export function sessionTotals(sessions, now = new Date()) {
   const today = localStudyDay(now);
   const weekStart = new Date(now);

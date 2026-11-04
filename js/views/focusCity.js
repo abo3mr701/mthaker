@@ -1,5 +1,12 @@
-export function landmarkProgress(city, index, minutes) {
-  const goal = city[index][0];
+export function landmarkProgress(city, index, minutes, projects = {}) {
+  const [goal, , , , , , , id, stages] = city[index];
+  if (id) {
+    const spent = (projects[id] || 0) / 60000;
+    const fraction = Math.min(1, spent / goal);
+    const stage = Math.floor(fraction * stages);
+    return { unlocked: spent > 0, complete: fraction === 1, fraction, stage, stages,
+      model: stage / stages * 3, remaining: Math.max(0, Math.ceil(goal - spent)), spent };
+  }
   const previous = city[index - 1]?.[0] ?? 0;
   const next = city[index + 1]?.[0] ?? goal + 600;
   const unlocked = minutes >= goal;
@@ -7,7 +14,8 @@ export function landmarkProgress(city, index, minutes) {
   const end = unlocked ? next : goal;
   const fraction = Math.max(0, Math.min(1, (minutes - start) / (end - start)));
   const stage = unlocked ? Math.min(3, 1 + Math.floor(fraction * 3)) : 0;
-  return { unlocked, fraction, stage, remaining: Math.max(0, Math.ceil(goal - minutes)), end };
+  return { unlocked, complete: unlocked, fraction, stage, stages: 3, model: stage,
+    remaining: Math.max(0, Math.ceil(goal - minutes)) };
 }
 
 function camera(turn) {
@@ -92,9 +100,9 @@ function tree(project,x,y,size,kind,colors,z=0) {
 }
 
 function landmarkModel(project,x,y,kind,stage,palette) {
-  const height = [.22,.62,1.25,2.12][stage];
+  const height = .22 + stage * (1.9 / 3);
   if (PLANTS.has(kind)) {
-    const count = stage === 0 ? 1 : stage * 3;
+    const count = Math.max(1, Math.ceil(stage * 3));
     return Array.from({length:count},(_,i) => {
       const dx = (i%3-1)*.32, dy=(Math.floor(i/3)-1)*.31;
       return tree(project,x+dx,y+dy,.16+stage*.12+offset(i,7)*.14,kind,palette.green,.035);
@@ -115,11 +123,35 @@ function landmarkModel(project,x,y,kind,stage,palette) {
     return solid(project,x,y,1.2,.27,.09,.16+stage*.035,TIMBER)
       + solid(project,x-.28,y,.24,.25,.04,.27+stage*.13,CLAY,.88);
   }
-  const count = Math.max(1,stage + 1);
+  if (kind === 'fort') {
+    const walls = .06 + stage * .10;
+    const court = solid(project,x,y,.75,.68,.02,.055,CLAY);
+    const outer = [[0,-.31,.72,.09],[0,.31,.72,.09],[-.34,0,.09,.62],[.34,0,.09,.62]];
+    const towers = [[-.34,-.31],[.34,-.31],[-.34,.31],[.34,.31]];
+    const parts = outer.map(([dx,dy,w,l]) => [dx,dy,w,l,walls,1])
+      .concat(towers.map(([dx,dy]) => [dx,dy,.18,.18,walls+.04+stage*.045,.74]));
+    return court + parts.sort((a,b)=>project([x+a[0],y+a[1],0])[2]-project([x+b[0],y+b[1],0])[2])
+      .map(([dx,dy,w,l,h,taper])=>solid(project,x+dx,y+dy,w,l,.035,h,CLAY,taper)).join('');
+  }
+  if (kind === 'campus') {
+    const roof = .07 + stage * .12;
+    const colors = ['#e6dfc9','#c6bda6','#9c927e'];
+    const wings = [[-.31,0,.23,.59],[.31,0,.23,.59],[0,-.26,.58,.2]];
+    return solid(project,x,y,.9,.76,.02,.05,palette.green)
+      + wings.sort((a,b)=>project([x+a[0],y+a[1],0])[2]-project([x+b[0],y+b[1],0])[2])
+        .map(([dx,dy,w,l])=>solid(project,x+dx,y+dy,w,l,.05,roof,colors)).join('')
+      + solid(project,x,y,.29,.22,.055,.06+stage*.07,GLASS);
+  }
+  if (kind === 'house' || kind === 'shop') {
+    const top = .07 + stage * .095;
+    return solid(project,x,y,.4,.34,.035,top,palette.block)
+      + (stage > 1 ? solid(project,x,y,.43,.37,top,top+.06,kind==='house'?ROOFS[0]:ROOFS[2],.72) : '');
+  }
+  const count = Math.floor(stage) + 1;
   return Array.from({length:count},(_,i) => {
     const dx = (i%2-.5)*.58, dy=(Math.floor(i/2)-.5)*.48;
     const z = kind==='financial' ? height*(.54+offset(i,2)*.45) : .14 + stage*.14 + offset(i,8)*.15;
-    const colors = kind==='financial'?GLASS:kind==='fort'?CLAY:palette.block;
+    const colors = kind==='financial'?GLASS:kind==='fort'?CLAY:kind==='campus'?['#d8eaf0','#8fadc6','#687f9c']:palette.block;
     const body = solid(project,x+dx,y+dy,.42,.36,.025,z,colors,kind==='financial'?.68:1);
     return body + (kind==='harbor' ? solid(project,x+dx,y+dy,.48,.42,z,z+.19,ROOFS[i%4],.15) : '');
   }).join('');
@@ -145,7 +177,7 @@ function activity(project,x,y,planting,phase) {
   return tool + worker(cx,cy,false) + worker(ax,ay,true);
 }
 
-export function cityScene(world, minutes, selected, turn, escape) {
+export function cityScene(world, minutes, selected, turn, escape, projects = {}, activeProject = null) {
   const project = camera(turn);
   const palette = PALETTES[world.terrain];
   const dry = world.terrain === 'desert';
@@ -158,7 +190,7 @@ export function cityScene(world, minutes, selected, turn, escape) {
   if (dry) lanes.push(street(project,[[1.15,-4.8],[1.27,-2],[1.03,1.9],[1.35,4.7]],'#f6dfbc',1.2));
   const objects = [];
   const add = (x,y,html) => objects.push({depth:project([x,y,0])[2],html});
-  for (let row=0;row<13;row++) {
+  for (let row=0;!dry&&row<13;row++) {
     for (let col=0;col<16;col++) {
       const i=row*16+col;
       const x=-5.35+col*.71+offset(i,3)*.22;
@@ -184,17 +216,19 @@ export function cityScene(world, minutes, selected, turn, escape) {
   for (const [x,y,height] of ridges) add(x,y,solid(project,x,y,1.7,1.35,.005,height,palette.ridge,.12));
   const next = landmarks.findIndex(([goal])=>minutes<goal);
   const locations = [];
-  landmarks.forEach(([, , label, , x,y,kind],index) => {
-    const progress = landmarkProgress(landmarks,index,minutes);
+  landmarks.forEach(([, , label, , x,y,kind,id],index) => {
+    const progress = landmarkProgress(landmarks,index,minutes,projects);
     const isSelected=index===selected;
     const plant=PLANTS.has(kind);
-    const isActive=index===next || (progress.unlocked && progress.stage<3);
-    const stage = progress.stage;
-    const model = progress.unlocked || isActive ? landmarkModel(project,x,y,kind,stage,palette) : '';
-    const lot = solid(project,x,y,1.13,1.05,.015,.045,isSelected?['#ffe491','#d5a950','#aa7b38']:plant?palette.green:palette.block);
+    const isActive = id ? id === activeProject && !progress.complete
+      : index===next || (progress.unlocked && progress.stage<3);
+    const stage = progress.model;
+    const model = progress.unlocked || isActive || id ? landmarkModel(project,x,y,kind,stage,palette) : '';
+    const compact = id?.startsWith('lot-');
+    const lot = solid(project,x,y,compact ? .66 : 1.13,compact ? .65 : 1.05,.015,.045,isSelected?['#ffe491','#d5a950','#aa7b38']:plant?palette.green:palette.block);
     const [cx,cy] = project([x,y,0]);
     const tower = kind === 'kingdom' || kind === 'faisaliah' || kind === 'financial';
-    locations[index] = [cx, cy - (tower ? [5, 16, 37, 62][stage] : 9)];
+    locations[index] = [cx, cy - (tower ? 5 + stage * 19 : 9)];
     add(x,y,`<g class="city-lot" role="button" tabindex="0" data-tile="${index}" aria-pressed="${isSelected}"
       aria-label="${escape(label)}"><title>${escape(label)}</title>${lot}${model}
       ${isActive ? activity(project,x,y,plant,stage) : ''}
