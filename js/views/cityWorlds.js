@@ -84,3 +84,58 @@ for (let row = 0; row < 10; row++) {
       x, y, kind, `lot-${row}-${column}`, 6]);
   }
 }
+
+/* Plan coordinates are schematic. Keep existing project IDs and study budgets when moving lots. */
+const riyadhPlan = CITY_WORLDS.riyadh;
+riyadhPlan.description = 'من وادي حنيفة والدرعية غربًا إلى الملز شرقًا، مرورًا بالعقيق والعليا والرياض التاريخية.';
+riyadhPlan.terrain = 'riyadh';
+const locations = {
+  kingdom:[-.07,-1.48], faisaliah:[-.07,.88], kafd:[1.65,-5.58], 'riyadh-park':[3.16,-5.65],
+  'wadi-hanifah':[-7.47,.43], 'al-kindi':[-5.63,.96], bujairi:[-7.04,-3.48], turaif:[-8.36,-3.79],
+  'ksu-campus':[-4.55,-3.32], 'ksu-library':[-5.61,-3.28], 'ksu-hospital':[-4.52,-4.5],
+  masmak:[-.05,5.12], 'al-zal':[-1.45,5.1], 'qasr-metro':[.95,5.24], salam:[-3.04,5.38],
+  'national-museum':[.97,3.13], murabba:[-.07,3.15], 'kaz-library':[1.91,3.13],
+  'historical-park':[-1.68,3.21], 'king-abdullah-park':[5.05,3.7], 'riyadh-zoo':[6.65,3.67],
+  'king-salman-park':[4.81,-.46], 'sports-boulevard':[-7.77,-.93],
+};
+const blocks = [
+  ['العقيق',1.55,-4.46,2], ['العقيق',4.18,-4.46,2], ['العليا',-1.95,-1.4,2],
+  ['العليا',.96,-1.4,2], ['العليا',-1.95,1.12,2], ['العليا',2.2,1.12,2],
+  ['حي السفارات',-5.65,2.12,2], ['حي السفارات',-4.42,.91,1], ['حي السفارات',-5.65,-.4,2],
+  ['المربع',.75,4.08,2], ['المربع',2.35,4.08,2], ['الديرة',-2.7,4.09,2],
+  ['الديرة',-2.18,5.68,2], ['الملز',5.18,1.72,2], ['الملز',7.32,2.18,2],
+  ['العقيق',5.49,-4.46,2], ['الملز',7.32,4.73,2], ['العليا',3.53,-1.4,2],
+];
+const positions = new Map();
+for (const [district, x, y, density] of blocks) {
+  const lots = positions.get(district) ?? [];
+  for (let row = 0; row < 2; row++) {
+    for (let col = 0; col < density + 1; col++) {
+      const px = x + (col - density / 2) * .43, py = y + (row - .5) * .50;
+      if (Object.values(locations).every(([lx,ly]) => Math.hypot(lx-px,ly-py) > .59)
+        && lots.every(([lx,ly]) => Math.hypot(lx-px,ly-py) > .39)) lots.push([px,py]);
+    }
+  }
+  positions.set(district,lots);
+}
+const cursors = new Map();
+for (const landmark of riyadhPlan.landmarks) {
+  const key = landmark[7];
+  const district = landmark[2].split(' · ')[0];
+  const slots = positions.get(district) ?? [];
+  const cursor = cursors.get(district) ?? 0;
+  const point = locations[key] ?? slots[cursor];
+  if (point) {
+    [landmark[4], landmark[5]] = point;
+    if (!locations[key]) cursors.set(district, cursor + 1);
+  }
+}
+for (const [district, slots] of positions) {
+  for (let index = cursors.get(district) ?? 0; index < slots.length; index++) {
+    const [x,y] = slots[index];
+    const kind = index % 4 === 3 ? 'shop' : 'house';
+    riyadhPlan.landmarks.push([kind === 'house' ? 150 : 180, kind === 'house' ? '🏠' : '🏪',
+      `${district} · ${kind === 'house' ? 'وحدة سكنية' : 'واجهة تجارية'} ${index+1}`,
+      'مشروع عمراني داخل الحي.',x,y,kind,`block-${blocks.findIndex(([name])=>name===district)}-${index}`,6]);
+  }
+}

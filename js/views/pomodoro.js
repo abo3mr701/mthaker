@@ -4,7 +4,7 @@ import { auth } from '../services/firebase.js';
 import { uid, showToast, formatTimer, escHtml } from '../utils/helpers.js';
 import { localStudyDay } from '../services/reviewPlanSchedule.js';
 import { sessionTotals, addStudySpan, studyDuration, projectStudyTotals, creditStudyProject } from '../services/studyTime.js';
-import { cityScene, landmarkProgress, CITY_FRAME } from './focusCity.js';
+import { cityScene, landmarkProgress, CITY_FRAME, riyadhTowerClip } from './focusCity.js';
 import { CITY_WORLDS } from './cityWorlds.js';
 
 const MODES = { pomodoro: 'بومودورو', countdown: 'عد تنازلي', stopwatch: 'عداد مفتوح' };
@@ -19,7 +19,7 @@ let worldId = 'riyadh';
 let cameraBox = [...CITY_FRAME];
 let cityLocations = [];
 let cityPaintKey = '';
-let citySecond = 0;
+let cityPulse = -1;
 let savedProjects = {};
 let audio;
 
@@ -86,9 +86,9 @@ async function tick() {
   if (elapsed(state) >= limit(state)) await finish(state, true);
   else {
     updateControls();
-    const second = Math.floor(Date.now() / 1000);
-    if (worldId === 'riyadh' && state.phase === 'study' && second !== citySecond) {
-      citySecond = second;
+    const pulse = Math.floor(Date.now() / 250);
+    if (worldId === 'riyadh' && state.phase === 'study' && pulse !== cityPulse) {
+      cityPulse = pulse;
       refreshCity();
     }
   }
@@ -444,10 +444,38 @@ function paintCity(minutes) {
     : progress.unlocked ? `المرحلة ${progress.stage} من 3 · ${detail}` : `باقي ${progress.remaining} دقيقة مذاكرة لفتحه.`;
   const place = view.querySelector('#focus-place');
   const markup = `<strong>${icon} ${escHtml(label)}</strong><span>${escHtml(description)}</span>
-    <progress max="1" value="${progress.fraction}" aria-label="تقدّم المعلم"></progress>
-    ${project ? `<small>وقت العمل: <bdi>${formatTimer(Math.floor(progress.spent * 60))}</bdi> · احفظ الجلسة لتثبيت التقدم.</small>` : ''}`;
+    <progress max="1" aria-label="تقدّم المعلم"></progress>
+    ${project ? `<div class="city-work-readout"><span data-work-status></span><bdi data-work-time></bdi></div>
+      <div class="city-work-cycle"><span data-work-step></span><progress max="1" aria-label="دورة العمل الحالية"></progress></div>
+      <small>المجسّم الشفاف يوضح شكل البرج النهائي. احفظ الجلسة لتثبيت وقت العمل.</small>` : ''}`;
   if (place.dataset.markup !== markup) {
     place.innerHTML = markup;
     place.dataset.markup = markup;
   }
+  place.querySelector('progress').value = progress.fraction;
+  if (project) updateRiyadhWork(map, place, world, progress);
+}
+
+const WORK_STEPS = ['تحديد موقع العمل','وصول المواد','رفع الحمولة','تجهيز القطعة','تثبيت القطعة','ضبط المحاذاة','فحص الجودة','تجهيز الدفعة التالية'];
+const GARDEN_STEPS = ['تحديد مساحة الزراعة','تجهيز التربة','توزيع الشتلات','حفر الأحواض','غرس الشتلات','ردم الأحواض','ري النباتات','فحص خطوط الري'];
+
+function updateRiyadhWork(map, place, world, progress) {
+  const running = timer.phase === 'study' && timer.started !== null && !progress.complete;
+  const seconds = progress.spent * 60;
+  const step = Math.floor(seconds / 3) % WORK_STEPS.length;
+  const kind = world.landmarks[selected][6];
+  const steps = ['palm','pine','garden'].includes(kind) ? GARDEN_STEPS : WORK_STEPS;
+  const time = place.querySelector('[data-work-time]');
+  const status = place.querySelector('[data-work-status]');
+  const caption = place.querySelector('[data-work-step]');
+  const hours = Math.floor(seconds / 3600);
+  time.textContent = (hours ? `${hours}:` : '') + formatTimer(Math.floor(seconds) % 3600);
+  status.textContent = progress.complete ? 'مكتمل' : running ? 'العمل جارٍ الآن' : seconds ? 'العمل متوقف' : 'ابدأ المؤقت لتشغيل الموقع';
+  caption.textContent = progress.complete ? 'انتهى العمل في الموقع' : `دورة العمل · ${steps[step]}`;
+  caption.nextElementSibling.value = progress.complete ? 1 : (seconds % 24) / 24;
+  const clip = riyadhTowerClip(world, cityTurn, selected, progress.fraction);
+  if (clip) map.querySelector(`#${clip.id} rect`)?.setAttribute('y', clip.y.toFixed(4));
+  map.querySelectorAll('[data-build-step]').forEach(marker => {
+    marker.setAttribute('opacity', seconds && Number(marker.dataset.buildStep) <= step ? '1' : '.23');
+  });
 }

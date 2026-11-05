@@ -178,6 +178,7 @@ function activity(project,x,y,planting,phase) {
 }
 
 export function cityScene(world, minutes, selected, turn, escape, projects = {}, activeProject = null) {
+  if (world.terrain === 'riyadh') return riyadhScene(world, minutes, selected, turn, escape, projects, activeProject);
   const project = camera(turn);
   const palette = PALETTES[world.terrain];
   const dry = world.terrain === 'desert';
@@ -239,4 +240,230 @@ export function cityScene(world, minutes, selected, turn, escape, projects = {},
     ${ground}${lanes.join('')}${objects.sort((a,b)=>a.depth-b.depth).map(item=>item.html).join('')}
   </svg>`;
   return { svg, locations };
+}
+
+const RIYADH_BOUNDARY = [[-9.4,-5.4],[-8.1,-7],[-3.1,-7.2],[2.5,-7.3],[7,-6.9],[9,-5.4],[9.35,-1.2],[8.9,2.8],[8.25,6.05],[5.55,7],[-1.6,6.95],[-5.7,6.35],[-8.1,5.05],[-9.2,1.5]];
+const ASPHALT = '#434f60';
+const PAVEMENT = '#aab4b8';
+const LIMESTONE = ['#f6ebd8','#c9bcaa','#a99c8a'];
+const WADI = [[-8.45,-6.35],[-7.72,-4.7],[-7.67,-3.2],[-8.2,-1.65],[-7.6,.2],[-7.35,1.8],[-6.8,3.2],[-6.24,4.65],[-5.7,5.9]];
+const RIYADH_ROADS = [
+  { path:[[-7.75,-5],[-5.1,-5],[-2.65,-5.02],[.46,-5.03],[4.75,-5.04],[7.65,-5]], lanes:4 },
+  { path:[[-6.8,-2.39],[-4.2,-2.38],[-2.64,-2.39],[.46,-2.4],[4.8,-2.4],[7.7,-2.4]], lanes:4 },
+  { path:[[-6.9,.23],[-4.7,.24],[-2.64,.24],[.46,.24],[4.18,.24],[7.8,.22]], lanes:3 },
+  { path:[[-6.4,2.66],[-3.75,2.66],[-2.64,2.66],[.46,2.66],[4.32,2.66],[8.13,2.65]], lanes:3 },
+  { path:[[-5.3,4.76],[-2.64,4.75],[.46,4.76],[4.7,4.76],[8.2,4.8]], lanes:2 },
+  { path:[[.46,-6.62],[.46,-5],[.46,-2.4],[.46,.24],[.46,2.66],[.46,4.76],[.46,6.3]], lanes:5 },
+  { path:[[-2.63,-6.53],[-2.64,-4.99],[-2.64,-2.39],[-2.64,.24],[-2.64,2.66],[-2.64,4.76]], lanes:3 },
+  { path:[[4.76,-6.43],[4.75,-5.04],[4.8,-2.4],[4.18,.24],[4.32,2.66],[4.7,4.76],[4.7,6.25]], lanes:3 },
+  { path:[[-6.35,-4.95],[-6.35,-2.39],[-6.35,.23],[-6.35,2.65]], lanes:2 },
+  { path:[[7.03,-5],[7.03,-2.4],[7.03,.23],[7.03,2.65],[7.03,5.65]], lanes:2 },
+  { path:[[-6.9,-5.7],[-5.5,-5.91],[-2.65,-5.91],[.46,-5.91]], lanes:1 },
+  { path:[[.46,-3.76],[2.7,-3.77],[4.78,-3.77],[7.03,-3.77]], lanes:1 },
+  { path:[[-6.35,1.52],[-4.7,1.52],[-2.64,1.52]], lanes:1 },
+  { path:[[.46,1.62],[2.2,1.63],[4.25,1.63]], lanes:1 },
+  { path:[[.46,3.62],[2.35,3.62],[4.48,3.62]], lanes:1 },
+  { path:[[-3.8,5.95],[-1.15,5.95],[.46,5.95],[2.9,5.95]], lanes:1 },
+];
+const DISTRICT_LABELS = [
+  ['العقيق', 2.3,-6.53],['الدرعية',-7.8,-4.72],['جامعة الملك سعود',-4.72,-3.82],
+  ['العليا',-.87,-.08],['حي السفارات',-5.35,1.35],['الملز',6.32,2.95],
+  ['المربع',1.15,3.67],['الديرة',-1.3,5.64],
+];
+const PARKS = [
+  [-7.55,-3.25,1.1,1.65],[-7.56,.9,.95,1.62],[-5.3,1.03,1.6,.68],
+  [5.53,-.63,2.1,1.6],[5.71,3.74,2.54,1.33],[-3.26,5.44,1.19,.91],[-1.5,3.19,1.0,.65],
+];
+const URBAN_GREEN = ['#769772','#567f62','#39654e'];
+
+function cityCamera(turn) {
+  const angle = turn * Math.PI / 2, cos = Math.cos(angle), sin = Math.sin(angle);
+  return ([x,y,z]) => {
+    const u=x*cos-y*sin, v=x*sin+y*cos;
+    return [500+(u-v)*28,328+(u+v)*15-z*74,u+v];
+  };
+}
+
+function quad(project,x,y,width,length,z,color) {
+  return flatten(project,[[x-width/2,y-length/2],[x+width/2,y-length/2],[x+width/2,y+length/2],[x-width/2,y+length/2]],color,z);
+}
+
+function ribbon(project, path, color, width, extra = '') {
+  const points = path.map(([x,y])=>project([x,y,.022]).slice(0,2).map(n=>n.toFixed(1)).join(',')).join(' ');
+  return `<polyline points="${points}" stroke="${color}" stroke-width="${width}" stroke-linejoin="round" stroke-linecap="round" fill="none" ${extra}/>`;
+}
+
+function urbanGround(project) {
+  const edge = RIYADH_BOUNDARY.map(([x,y])=>[x,y,0]);
+  const sides = edge.map((p,i)=>{
+    const q=edge[(i+1)%edge.length];
+    return face(project,[p,q,[q[0],q[1],-.45],[p[0],p[1],-.45]],i%2?'#77838a':'#596a72');
+  }).sort((a,b)=>a.depth-b.depth).map(f=>f.html).join('');
+  const plots = PARKS.map(([x,y,w,l])=>quad(project,x,y,w,l,.006,'#a9be97')
+    + ribbon(project,[[x-w*.42,y+l*.37],[x,y],[x+w*.39,y-l*.35]],'#e0dbc7',2)).join('');
+  const blocks = [[-4.7,-4.22,2.55,1.3],[-.92,-1.09,2.8,2.1],[1.85,-4.1,2.56,1.44],
+    [-1.22,4.17,2.6,1.08],[1.92,4.09,2.7,1.03],[6.1,1.48,1.7,1.2]];
+  const sidewalks = RIYADH_ROADS.map(({path,lanes})=>ribbon(project,path,PAVEMENT,lanes*2.25+4));
+  const carriageways = RIYADH_ROADS.map(({path,lanes})=>ribbon(project,path,ASPHALT,lanes*2.25));
+  const markings = RIYADH_ROADS.filter(({lanes})=>lanes>1).map(({path,lanes})=>
+    ribbon(project,path,lanes===5?'#f1cf79':'#e3e7e6',.75,'stroke-dasharray="4 5"'));
+  const crossings = [-2.4,.24,2.66,4.76].map(y=>Array.from({length:5},(_,i)=>
+    quad(project,.31+i*.072,y+.26,.043,.13,.028,'#edf0e8')).join('')).join('');
+  return sides + face(project,edge,'#c6cdcb').html
+    + blocks.map(([x,y,w,l])=>quad(project,x,y,w,l,.004,'#e1e3d9')).join('')
+    + ribbon(project,WADI,'#91aa81',21) + ribbon(project,WADI,'#6b9b9d',7)
+    + plots
+    + [...sidewalks,...carriageways,...markings].join('') + crossings;
+}
+
+/** Shaded faces and projected windows keep detailing aligned when rotating. */
+function facade(project,x,y,w,l,z0,z1,colors,columns=4,floors=4,taper=1) {
+  const bounds = (z,s)=>[[x-w*s/2,y-l*s/2,z],[x+w*s/2,y-l*s/2,z],[x+w*s/2,y+l*s/2,z],[x-w*s/2,y+l*s/2,z]];
+  const lower=bounds(z0,1),upper=bounds(z1,taper);
+  const lerp = (a,b,t)=>a.map((n,i)=>n+(b[i]-n)*t);
+  const sides = lower.map((p,i)=>{
+    const j=(i+1)%4;
+    const shape=face(project,[p,lower[j],upper[j],upper[i]],colors[i%2+1]);
+    const at=(u,v)=>lerp(lerp(p,lower[j],u),lerp(upper[i],upper[j],u),v);
+    let details='';
+    for(let row=0;row<floors;row++) for(let col=0;col<columns;col++) {
+      const u=(col+.19)/columns, r=(col+.81)/columns, b=(row+.26)/floors, t=(row+.76)/floors;
+      details+=face(project,[at(u,b),at(r,b),at(r,t),at(u,t)],(col+row)%5===0?'#c2d9df':'#426579').html;
+    }
+    return { depth:shape.depth,html:shape.html+details };
+  }).sort((a,b)=>a.depth-b.depth);
+  return sides.slice(-2).map(side=>side.html).join('') + face(project,upper,colors[0]).html;
+}
+
+const SKY = ['#e0f2f3','#86afba','#5f8d9f'];
+const CIVIC = ['#fff0d9','#cabca9','#a69b88'];
+const BLUE = ['#b8d9e0','#729da9','#527988'];
+function riyadhTower(project,x,y,kind) {
+  if (kind==='kingdom') {
+    const base = facade(project,x,y,.62,.34,.1,1.53,SKY,5,15,.87);
+    const wing = side => [[.025,1.50],[.087,1.59],[.135,1.74],[.17,1.94],[.197,2.15],[.208,2.35],
+      [.269,2.35],[.277,2.11],[.29,1.83],[.30,1.50]].map(([dx,z])=>[x+side*dx,z]);
+    const crown = [-1,1].map(side=>{
+      const profile=wing(side);
+      const back=profile.map(([px,z])=>[px,y-.14,z]);
+      const front=profile.map(([px,z])=>[px,y+.14,z]);
+      const panels=profile.map((_,i)=>{
+        const next=(i+1)%profile.length;
+        return face(project,[back[i],back[next],front[next],front[i]],i<5?'#658693':'#9fc0c9');
+      });
+      return [...panels,face(project,back,'#a4c5cf'),face(project,front,'#85aebd')]
+        .sort((a,b)=>a.depth-b.depth).map(part=>part.html).join('');
+    }).join('');
+    return base+crown+solid(project,x,y,.51,.21,2.32,2.35,SKY);
+  }
+  if(kind==='faisaliah') {
+    const body = facade(project,x,y,.66,.59,.09,1.84,BLUE,5,14,.19);
+    const [cx,cy]=project([x,y,1.56]);
+    return body+`<circle cx="${cx}" cy="${cy}" r="6" fill="#dcaf56" stroke="#f6df9b" stroke-width="1.5"/>`
+      + solid(project,x,y,.057,.057,1.84,2.07,SKY,.22);
+  }
+  const group=[[-.37,.2,.37,.38,1.25],[.03,.04,.4,.42,2.05],[.43,.20,.35,.33,1.63],
+    [-.35,-.26,.32,.33,1.64],[.36,-.24,.32,.32,1.27]];
+  return group.sort((a,b)=>project([x+a[0],y+a[1],0])[2]-project([x+b[0],y+b[1],0])[2])
+    .map(([dx,dy,w,l,h],i)=>facade(project,x+dx,y+dy,w,l,.09,h,i%2?BLUE:SKY,3,10,.70)).join('');
+}
+
+function riyadhLandmark(project,lot,progress) {
+  const [, , , , x,y,kind,id] = lot;
+  const fraction=progress.fraction;
+  const short = kind==='house'||kind==='shop';
+  const tower = ['kingdom','faisaliah','financial'].includes(kind);
+  if(tower) {
+    // The blueprint previews the finished skyline. Only the solid part is earned.
+    const totalHeight=kind==='kingdom'?2.37:kind==='faisaliah'?2.07:2.05;
+    const top=project([x,y,0])[1]-totalHeight*74*fraction;
+    const full=riyadhTower(project,x,y,kind);
+    const clipId=`riyadh-rise-${id}`;
+    return `<defs><clipPath id="${clipId}"><rect x="0" y="${top.toFixed(2)}" width="1000" height="650"/></clipPath></defs>
+      <g opacity="${progress.complete?0:.50}">${full}</g><g clip-path="url(#${clipId})">${full}</g>`
+      + solid(project,x,y,kind==='financial'?1.34:.96,kind==='financial'?.91:.73,.028,.079,LIMESTONE);
+  }
+  if(PLANTS.has(kind)) {
+    const grove=[[-.34,-.25],[.31,-.24],[-.31,.25],[.34,.25],[0,-.36],[0,.36]];
+    const small=id.startsWith('lot-');
+    const paths=id==='king-salman-park'
+      ? ribbon(project,[[x-.62,y],[x-.26,y-.38],[x+.37,y-.31],[x+.60,y+.06],[x+.21,y+.41],[x-.42,y+.34],[x-.62,y]],'#f0e5cf',2)
+      : id==='salam' ? quad(project,x,y,.33,.24,.059,'#75a5b2') : '';
+    return quad(project,x,y,small?.35:.82,small?.35:.68,.052,'#9bb28b') + paths
+      + grove.slice(0,Math.max(2,Math.ceil(fraction*grove.length))).map(([dx,dy],i)=>
+        tree(project,x+dx*(small?.43:1),y+dy*(small?.43:1),.17+fraction*.20+(i%2)*.05,
+          kind==='palm'?'palm':'garden',URBAN_GREEN,.052)).join('');
+  }
+  if(kind==='fort') {
+    const height=.22+fraction*.24;
+    return landmarkModel(project,x,y,kind,1.5+fraction*1.5,{green:URBAN_GREEN,block:CIVIC})
+      + solid(project,x,y-.34,.24,.07,.04,height,LIMESTONE);
+  }
+  if(kind==='campus') {
+    const h=.23+fraction*.35;
+    return quad(project,x,y,.95,.78,.055,'#8caa85')
+      + facade(project,x-.29,y,.27,.67,.05,h,CIVIC,2,4)
+      + facade(project,x+.29,y,.27,.67,.05,h,CIVIC,2,4)
+      + facade(project,x,y-.28,.61,.23,.05,h,CIVIC,4,4)
+      + facade(project,x,y+.09,.29,.26,.05,h*.58,BLUE,2,2);
+  }
+  if(kind==='bridge') return landmarkModel(project,x,y,kind,1+fraction*2,{green:URBAN_GREEN,block:CIVIC});
+  const palette = kind==='shop'?BLUE:id==='riyadh-park'?['#f4f0df','#c9bca6','#a39988']:CIVIC;
+  const w=short?.29:.68,l=short?.28:.52;
+  const h=(short?.18:.25)+fraction*(short?.25:.36);
+  const roof=solid(project,x,y,w*.4,l*.44,h,h+.038,LIMESTONE);
+  const entry=facade(project,x,y+l*.46,w*.57,.095,.045,.115,BLUE,2,1);
+  return facade(project,x,y,w,l,.05,h,palette,short?2:5,short?2:4)+entry+roof;
+}
+
+function buildYard(project,x,y,kind,compact) {
+  const park=PLANTS.has(kind), s=compact?.48:.82, color=park?'#78b38d':'#e9b85d';
+  const [cx,cy]=project([x,y+s*.58,.05]);
+  const markers=Array.from({length:8},(_,i)=>
+    `<rect data-build-step="${i}" x="${(cx-16+i*4.25).toFixed(2)}" y="${(cy+3).toFixed(2)}" width="3.5" height="2.7" rx=".6" fill="${color}" opacity=".23"/>`).join('');
+  return `<g aria-hidden="true" class="city-build-yard">
+    ${ribbon(project,[[x-s/2,y+s/2],[x+s/2,y+s/2],[x+s/2,y-s/2]],color,1.7,'stroke-dasharray="2 3"')}
+    ${activity(project,x,y,park,compact?0:1)}${markers}</g>`;
+}
+
+function riyadhScene(world,minutes,selected,turn,escape,projects,activeProject) {
+  const project=cityCamera(turn);
+  const locations=[];
+  const objects=[];
+  const add=(x,y,html)=>objects.push({depth:project([x,y,0])[2],html});
+  PARKS.forEach(([x,y,w,l])=>{
+    for(let i=0;i<5;i++) {
+      const tx=x-w*.41+i*w*.2,ty=y+l*.34;
+      add(tx,ty,tree(project,tx,ty,.21,i%2?'garden':'palm',URBAN_GREEN));
+    }
+  });
+  world.landmarks.forEach((lot,index)=>{
+    const [, , label, ,x,y,kind,id]=lot;
+    const p=landmarkProgress(world.landmarks,index,minutes,projects);
+    const isSelected=index===selected,compact=/^(lot|block)-/.test(id);
+    const [cx,cy]=project([x,y,.024]);
+    locations[index]=[cx,cy-(['kingdom','faisaliah','financial'].includes(kind)?65:18)];
+    const base=quad(project,x,y,compact?.40:1.01,compact?.42:.88,.03,isSelected?'#9dd0d7':PLANTS.has(kind)?'#9bb18e':'#dce0d9');
+    const model=riyadhLandmark(project,lot,p);
+    const pin=isSelected||!compact?`<circle cx="${cx}" cy="${cy+13}" r="${isSelected?4.5:2.7}" fill="${isSelected?'#eec476':'#f7f3e7'}" stroke="#4b626d" stroke-width="1"/>`:'';
+    add(x,y,`<g class="city-lot" role="button" tabindex="0" data-tile="${index}" data-project="${id}" aria-pressed="${isSelected}" aria-label="${escape(label)}">
+      <title>${escape(label)}</title>${base}<g data-city-model>${model}</g>${pin}
+      ${id===activeProject&&!p.complete?buildYard(project,x,y,kind,compact):''}</g>`);
+  });
+  const labels=DISTRICT_LABELS.map(([label,x,y])=>{
+    const [cx,cy]=project([x,y,.02]);
+    return `<text class="riyadh-map-label" x="${cx}" y="${cy}" text-anchor="middle" direction="rtl">${escape(label)}</text>`;
+  }).join('');
+  return {locations,svg:`<svg class="city-scene riyadh-scene" viewBox="0 0 1000 650" role="group" aria-label="مجسّم مدينة الرياض">
+    <ellipse cx="500" cy="553" rx="388" ry="45" fill="#253b47" opacity=".18"/>
+    ${urbanGround(project)}${objects.sort((a,b)=>a.depth-b.depth).map(o=>o.html).join('')}
+    <g class="riyadh-map-labels" aria-hidden="true">${labels}</g>
+  </svg>`};
+}
+
+export function riyadhTowerClip(world, turn, selected, fraction) {
+  const [, , , ,x,y,kind,id]=world.landmarks[selected];
+  const height={kingdom:2.37,faisaliah:2.07,financial:2.05}[kind];
+  if (!height) return null;
+  return {id:`riyadh-rise-${id}`,y:cityCamera(turn)([x,y,0])[1]-height*74*fraction};
 }

@@ -1617,6 +1617,18 @@ body.sidebar-collapsed .sidebar { display: none; }
 .focus-map.is-zoomed { touch-action:none; cursor:grab; }
 .focus-map.is-zoomed:active { cursor:grabbing; }
 .city-scene { width:100%; aspect-ratio:1000 / 650; height:auto; user-select:none; }
+.focus-map:has(.riyadh-scene) { background:radial-gradient(ellipse at 50% 15%,#e6eef2,#aabec8); }
+[data-theme="dark"] .focus-map:has(.riyadh-scene) { background:radial-gradient(ellipse at 50% 15%,#536b7c,#243746); }
+.riyadh-map-label { font:700 12px var(--font); fill:#263e4b; stroke:#e7ece6; stroke-width:3px; paint-order:stroke; }
+.riyadh-map-labels { pointer-events:none; }
+.focus-map.is-zoomed .riyadh-map-labels { display:none; }
+.city-work-readout,.city-work-cycle { display:flex; align-items:center; justify-content:space-between; gap:var(--s4); }
+.city-work-readout { margin-top:var(--s3); padding-top:var(--s3); border-top:1px solid var(--border); font-size:.9rem; }
+.city-work-readout bdi { color:var(--text1); font-weight:700; font-variant-numeric:tabular-nums; }
+.city-work-cycle { font-size:.78rem; }
+.city-work-cycle progress { max-width:35%; accent-color:var(--success); }
+.city-build-yard { pointer-events:none; }
+.focus-place small { color:var(--text2); }
 .city-help { margin-top:var(--s2); }
 .city-help a { text-decoration:underline; text-underline-offset:2px; }
 .city-lot { cursor:pointer; }
