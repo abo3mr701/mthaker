@@ -19,6 +19,9 @@ let worldId = 'riyadh';
 let cameraBox = [...CITY_FRAME];
 let cityLocations = [];
 let cityPaintKey = '';
+let cityLighting = 'auto';
+let lightingTimer = null;
+const riyadhClock = new Intl.DateTimeFormat('en-GB', { timeZone:'Asia/Riyadh', hour:'2-digit', hourCycle:'h23' });
 let cityPulse = -1;
 let savedProjects = {};
 let audio;
@@ -30,6 +33,7 @@ function newTimer() {
 
 export function resetStudyTimer() {
   clearInterval(ticker);
+  clearTimeout(lightingTimer);
   owner = null;
   timer = newTimer();
   records = [];
@@ -209,6 +213,9 @@ export async function renderPomodoro(container) {
         <label>المدينة <select id="city-world" class="form-select">${Object.entries(CITY_WORLDS).map(([id, world]) =>
           `<option value="${id}">${world.name}</option>`).join('')}</select></label>
         <label>المعلم <select id="city-landmark" class="form-select"></select></label>
+        <label id="city-light-control">إضاءة المدينة <select id="city-lighting" class="form-select">
+          <option value="auto">تلقائي · توقيت الرياض</option><option value="day">نهار</option><option value="night">ليل</option>
+        </select></label>
       </div>
       <div class="city-controls" aria-label="التحكم بالخريطة">
         <button type="button" class="btn btn-primary btn-sm" id="city-visit">اقترب من المعلم</button>
@@ -322,6 +329,19 @@ function paintProgress() {
 function bindCity(get) {
   const map = get('focus-map');
   const redraw = refreshCity;
+  const lighting = get('city-lighting');
+  lighting.value = cityLighting;
+  lighting.addEventListener('change', event => {
+    cityLighting = event.target.value;
+    paintCityLight(map);
+  });
+  clearTimeout(lightingTimer);
+  function checkLight() {
+    if (!map.isConnected) return;
+    paintCityLight(map);
+    lightingTimer = setTimeout(checkLight, 15000);
+  }
+  lightingTimer = setTimeout(checkLight, 15000);
   function switchProject(nextWorld, index) {
     const now = Date.now();
     const running = timer.started !== null && timer.phase === 'study';
@@ -385,6 +405,12 @@ function bindCity(get) {
   });
 }
 
+function paintCityLight(map) {
+  const hour = Number(riyadhClock.format(new Date()));
+  map.dataset.cityLight = worldId === 'riyadh' && (cityLighting === 'night'
+    || cityLighting === 'auto' && (hour < 6 || hour >= 18)) ? 'night' : 'day';
+}
+
 function zoomCity(zoom, center = [cameraBox[0] + cameraBox[2] / 2, cameraBox[1] + cameraBox[3] / 2]) {
   zoom = Math.max(1, Math.min(7, zoom));
   const width = CITY_FRAME[2] / zoom, height = CITY_FRAME[3] / zoom;
@@ -394,6 +420,8 @@ function zoomCity(zoom, center = [cameraBox[0] + cameraBox[2] / 2, cameraBox[1] 
 
 function applyCamera() {
   const map = view.querySelector('#focus-map');
+  view.querySelector('#city-light-control').hidden = worldId !== 'riyadh';
+  paintCityLight(map);
   const [,,width,height] = cameraBox;
   cameraBox[0] = Math.max(0, Math.min(CITY_FRAME[2] - width, cameraBox[0]));
   cameraBox[1] = Math.max(0, Math.min(CITY_FRAME[3] - height, cameraBox[1]));

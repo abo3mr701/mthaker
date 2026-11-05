@@ -1,3 +1,5 @@
+import { layoutRiyadh } from './riyadhPlan.js';
+
 export const CITY_WORLDS = {
   riyadh: {
     name: 'الرياض · السعودية',
@@ -139,3 +141,12 @@ for (const [district, slots] of positions) {
       'مشروع عمراني داخل الحي.',x,y,kind,`block-${blocks.findIndex(([name])=>name===district)}-${index}`,6]);
   }
 }
+
+riyadhPlan.landmarks.push(
+  [210, '☕', 'شارع التحلية · هاف مليون', 'مقهى مستوحى من أول فرع للعلامة في شارع التحلية.', 1.25, .86, 'cafe', 'halfm-tahlia', 8],
+  [180, '☕', 'الرياض · بارنز', 'فرع مصغّر مستوحى من مقاهي بارنز، بموقع تمثيلي في المجسّم.', 4.16, -3.1, 'cafe', 'barns-riyadh', 8],
+  [300, '🛍️', 'العقيق · مجمّع تجاري', 'متاجر ومطاعم وساحة مشاة داخل الحي.', 6.16, -5.55, 'retail', 'aqiq-retail', 10],
+  [270, '🛍️', 'الملز · مجمّع الحي', 'محلات متصلة برواق مظلّل وساحة جلوس.', 6.09, 4.19, 'retail', 'malaz-retail', 9],
+  [300, '🛍️', 'شرق الرياض · مجمّع المقاهي', 'مقاهٍ ومطاعم تطل على ساحة مشاة.', 5.95, 1.06, 'retail', 'east-food-court', 10],
+);
+layoutRiyadh(riyadhPlan.landmarks);

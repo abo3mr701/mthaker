@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { addStudySpan, sessionTotals, creditStudyProject, projectStudyTotals } from '../js/services/studyTime.js';
 import { CITY_WORLDS } from '../js/views/cityWorlds.js';
 import { cityScene, landmarkProgress } from '../js/views/focusCity.js';
+import { clearOfRoads, riyadhFootprint } from '../js/views/riyadhPlan.js';
 import { parseStudyBackup } from '../js/services/studyBackup.js';
 
 test('study time is split at local midnight and excludes breaks and paused time', () => {
@@ -50,4 +51,25 @@ test('saved work stays with each Riyadh project and does not credit unrelated st
   assert.equal((svg.match(/data-tile=/g) || []).length, world.landmarks.length);
   assert.equal((svg.match(/class="city-worker /g) || []).length, 2);
   assert.ok(!/NaN|undefined/.test(svg));
+});
+
+test('the complete Riyadh layout keeps lots outside sidewalks and each other', () => {
+  const world = CITY_WORLDS.riyadh;
+  assert.equal(new Set(world.landmarks.map(lot => lot[7])).size, world.landmarks.length);
+  for (const [index, lot] of world.landmarks.entries()) {
+    const [,,,,x,y,,id] = lot;
+    const [w,l] = riyadhFootprint(lot);
+    assert.ok(clearOfRoads(x,y,w,l), id + ' intersects a road');
+    for (const other of world.landmarks.slice(index+1)) {
+      const [ow,ol] = riyadhFootprint(other);
+      assert.ok(Math.abs(x-other[4]) >= (w+ow)/2 || Math.abs(y-other[5]) >= (l+ol)/2,
+        id + ' overlaps ' + other[7]);
+    }
+  }
+  for (const turn of [0,1,2,3]) {
+    const {svg} = cityScene(world,0,8,turn,value=>value);
+    assert.match(svg, /<animateMotion path="M/);
+    assert.match(svg, /riyadh-lamp-glow/);
+    assert.ok(!/undefined|NaN/.test(svg));
+  }
 });

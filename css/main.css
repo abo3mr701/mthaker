@@ -1609,6 +1609,8 @@ body.sidebar-collapsed .sidebar { display: none; }
 .city-pickers { display:grid; grid-template-columns:1fr 1.5fr; gap:var(--s4); margin-bottom:var(--s4); }
 .city-pickers label { display:grid; min-width:0; gap:var(--s2); }
 .city-pickers select { width:100%; }
+.city-pickers label[hidden] { display:none; }
+.city-pickers:has(#city-light-control:not([hidden])) { grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) minmax(0,1fr); }
 .focus-map {
   border:1px solid var(--border); border-radius:var(--r3); overflow:hidden;
   background:radial-gradient(ellipse at 50% 10%,#edf6ff,#b6cce3);
@@ -1620,6 +1622,17 @@ body.sidebar-collapsed .sidebar { display: none; }
 .focus-map:has(.riyadh-scene) { background:radial-gradient(ellipse at 50% 15%,#e6eef2,#aabec8); }
 [data-theme="dark"] .focus-map:has(.riyadh-scene) { background:radial-gradient(ellipse at 50% 15%,#536b7c,#243746); }
 .riyadh-map-label { font:700 12px var(--font); fill:#263e4b; stroke:#e7ece6; stroke-width:3px; paint-order:stroke; }
+.riyadh-road-label { font:700 7.5px var(--font); fill:#f7e5a5; stroke:#334254; stroke-width:2px; paint-order:stroke; }
+.riyadh-store-sign { font:700 3px system-ui,sans-serif; fill:#fff1d7; paint-order:stroke; stroke:#233845; stroke-width:.6; }
+.riyadh-lamp { opacity:0; }
+.focus-map[data-city-light="night"] { background:radial-gradient(ellipse at 50% 15%,#33465b,#101b2c); }
+[data-city-light="night"] .riyadh-urban-layer { filter:brightness(.56) saturate(.82); }
+[data-city-light="night"] .riyadh-lamp { opacity:1; }
+[data-city-light="night"] .city-window.is-lit { fill:#ffe0a1; }
+[data-city-light="night"] .riyadh-lamp,
+[data-city-light="night"] .city-window.is-lit { filter:brightness(1.8); }
+[data-city-light="night"] .riyadh-map-label { fill:#e4e8e7; stroke:#263448; }
+@media (prefers-reduced-motion:reduce) { .riyadh-vehicle { display:none; } }
 .riyadh-map-labels { pointer-events:none; }
 .focus-map.is-zoomed .riyadh-map-labels { display:none; }
 .city-work-readout,.city-work-cycle { display:flex; align-items:center; justify-content:space-between; gap:var(--s4); }
@@ -1654,6 +1667,7 @@ body.sidebar-collapsed .sidebar { display: none; }
 }
 @media (max-width:480px) {
   .city-pickers { grid-template-columns:1fr; }
+  .city-pickers:has(#city-light-control:not([hidden])) { grid-template-columns:1fr; }
 }
 @font-face { font-family:Tajawal; src:url('./fonts/tajawal-regular.ttf') format('truetype'); font-weight:400; font-display:swap; }
 @font-face { font-family:Tajawal; src:url('./fonts/tajawal-bold.ttf') format('truetype'); font-weight:700; font-display:swap; }
