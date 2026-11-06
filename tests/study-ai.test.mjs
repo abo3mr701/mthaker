@@ -52,3 +52,18 @@ test('AI never uses the preceding Mthaker account’s Puter session', async () =
   await assert.rejects(puterAI.generatePuterContent([]), /اربط حساب Puter/);
   assert.deepEqual(requests, ['puter-one', 'puter-two']);
 });
+
+test('flashcard generation keeps the distinct types, answers and explanations', async () => {
+  globalThis.captureStudyRequest = () => JSON.stringify([
+    { type: 'mcq', front: 'اختر', back: 'التفسير', options: ['أ', 'ب', 'ج', 'د'], answer: 'ب' },
+    { type: 'tf', front: 'العبارة', back: 'التصحيح', answer: 'خطأ' },
+    { type: 'essay', front: 'اشرح', back: 'الإجابة النموذجية' },
+    { type: 'mcq', front: 'خيار مفقود', back: 'التفسير', options: ['أ', 'ب', 'ج', 'د'], answer: 'هـ' },
+  ]);
+  const cards = await studyAI.generateFlashcards('هذا نص درس تجريبي طويل يصلح لبطاقات المراجعة.');
+  assert.deepEqual(cards.map(card => card.type), ['mcq', 'tf', 'essay']);
+  assert.deepEqual(cards[0].options, ['أ', 'ب', 'ج', 'د']);
+  assert.equal(cards[0].answer, 'ب');
+  assert.equal(cards[1].answer, 'خطأ');
+  assert.equal(cards[2].back, 'الإجابة النموذجية');
+});

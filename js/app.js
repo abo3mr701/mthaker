@@ -18,6 +18,7 @@ import { renderDashboard }     from './views/dashboard.js';
 import { renderSubjects }      from './views/subjects.js';
 import { renderSubjectDetail } from './views/subject-detail.js';
 import { renderStudy }         from './views/study.js';
+import { renderCardLibrary }   from './views/card-library.js';
 import { renderReviews }       from './views/reviews.js';
 import { renderPomodoro, resetStudyTimer } from './views/pomodoro.js';
 import { renderSettings }      from './views/settings.js';
@@ -27,7 +28,8 @@ import { renderChat, resetChat } from './views/chat.js';
 const ROUTES = [
   { pattern: /^#?dashboard$/,         view: 'dashboard',      title: 'لوحة التحكم',     navId: 'dashboard'  },
   { pattern: /^#?subjects$/,          view: 'subjects',       title: 'المواد الدراسية', navId: 'subjects'   },
-  { pattern: /^#?subject\/([^/]+)$/,  view: 'subject-detail', title: 'تفاصيل المادة',   navId: 'subjects'   },
+  { pattern: /^#?subject\/([^/]+)(?:\/lesson\/([^/]+))?$/, view: 'subject-detail', title: 'تفاصيل المادة', navId: 'subjects' },
+  { pattern: /^#?cards(?:\/([^/]+))?$/, view: 'cards', title: 'كل البطاقات', navId: 'study' },
   { pattern: /^#?study\/([^/]+)$/,    view: 'study',          title: 'مراجعة البطاقات',  navId: 'study'      },
   { pattern: /^#?study$/,             view: 'study',          title: 'مراجعة البطاقات',  navId: 'study'      },
   { pattern: /^#?reviews$/,           view: 'reviews',        title: 'المراجعات',        navId: 'reviews'    },
@@ -192,7 +194,10 @@ async function renderView(viewName, container, params) {
       return renderSubjects(container);
 
     case 'subject-detail':
-      return renderSubjectDetail(container, params[0]);
+      return renderSubjectDetail(container, decodeURIComponent(params[0]), params[1] && decodeURIComponent(params[1]));
+
+    case 'cards':
+      return renderCardLibrary(container, params[0] && decodeURIComponent(params[0]));
 
     case 'study':
       return renderStudy(container, params[0] || null);

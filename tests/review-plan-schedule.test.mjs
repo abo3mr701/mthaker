@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { scheduleReviewPlans } from '../js/services/reviewPlanSchedule.js';
-import { arabicMessageForDay, englishMessageForDay } from '../js/data/dailyMotivation.js';
+import { arabicMessageForTime, englishMessageForDay, MESSAGE_PERIOD_MS, verseForDay } from '../js/data/dailyMotivation.js';
 
 const today = '2026-11-04';
 const tomorrow = '2026-11-05';
@@ -34,9 +34,12 @@ test('already completed checkpoints consume slots even when scheduling for the f
   assert.equal(plans[0].reviews[1].dueDate, tomorrow);
 });
 
-test('home has 30 distinct daily messages and English changes with the date', () => {
-  const messages = Array.from({length:30}, (_, index) => arabicMessageForDay(`2026-11-${String(index+1).padStart(2,'0')}`));
-  assert.equal(new Set(messages.map(message => message.text)).size, 30);
-  assert.equal(messages.filter(message => message.author && message.source).length, 5);
+test('home shuffles 50 messages across two-hour slots and changes verses each day', () => {
+  const messages = Array.from({ length: 50 }, (_, index) => arabicMessageForTime(index * MESSAGE_PERIOD_MS));
+  assert.equal(new Set(messages.map(message => message.text)).size, 50);
+  assert.equal(messages.filter(message => message.author && message.source).length, 10);
+  assert.equal(arabicMessageForTime(MESSAGE_PERIOD_MS - 1), messages[0]);
+  assert.notEqual(arabicMessageForTime(50 * MESSAGE_PERIOD_MS), messages.at(-1));
+  assert.notEqual(verseForDay(today), verseForDay(tomorrow));
   assert.notEqual(englishMessageForDay(today), englishMessageForDay(tomorrow));
 });

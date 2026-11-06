@@ -2,27 +2,29 @@
  * subject-detail.js — Single subject: files, AI generation, flashcard management
  */
 
-import { subjects as subjectsDB, flashcards as cardsDB, files as filesDB } from '../db.js';
+import { subjects as subjectsDB, flashcards as cardsDB, files as filesDB, reviewPlans } from '../db.js';
 import { generateFlashcards, extractTextFromImage } from '../services/studyAI.js';
 import { requirePuterConnection } from '../services/puterAI.js';
 import { extractFileContent, needsVisionOCR, validateFile } from '../services/extractor.js';
 import { buildCard, stageLabel } from '../services/srs.js';
 import { refreshSubjectCardCount } from './subjects.js';
+import { cardChoices, cardTypeLabel } from './review-card.js';
 import {
   uid, showToast, showConfirm, debounce,
   fileIcon, humanSize, escHtml, truncate, todayStr,
 } from '../utils/helpers.js';
 
-export async function renderSubjectDetail(container, subjectId) {
+export async function renderSubjectDetail(container, subjectId, selectedPlanId) {
   container.innerHTML = `<div class="flex-center" style="padding:var(--s10)"><div class="spinner"></div></div>`;
 
-  const [subject, cards, subjectFiles] = await Promise.all([
+  const [subject, cards, subjectFiles, plans] = await Promise.all([
     subjectsDB.getById(subjectId),
     cardsDB.getBySubject(subjectId),
     filesDB.getBySubject(subjectId),
+    reviewPlans.getBySubject(subjectId),
   ]).catch(err => {
     container.innerHTML = `<div class="empty-state"><p class="text-danger">خطأ: ${err.message}</p></div>`;
-    return [null, [], []];
+    return [null, [], [], []];
   });
 
   if (!subject) {
@@ -35,10 +37,10 @@ export async function renderSubjectDetail(container, subjectId) {
     return;
   }
 
-  renderDetailUI(container, subject, cards, subjectFiles);
+  renderDetailUI(container, subject, cards, subjectFiles, plans, selectedPlanId);
 }
 
-function renderDetailUI(container, subject, cards, subjectFiles) {
+function renderDetailUI(container, subject, cards, subjectFiles, plans, selectedPlanId) {
   container.innerHTML = `
     <!-- Back link -->
     <a href="#subjects" class="btn btn-ghost btn-sm mb-4" style="display:inline-flex;">
@@ -53,7 +55,7 @@ function renderDetailUI(container, subject, cards, subjectFiles) {
       <div>
         <h2 class="subject-detail-name">${escHtml(subject.name)}</h2>
         <p class="subject-detail-meta">
-          ${cards.length} بطاقة تعليمية · ${subjectFiles.length} ملف
+          <span id="subject-card-count">${cards.length}</span> بطاقة تعليمية · ${subjectFiles.length} ملف
         </p>
       </div>
     </div>
@@ -66,7 +68,7 @@ function renderDetailUI(container, subject, cards, subjectFiles) {
 
     <!-- Files tab -->
     <div id="tab-files">
-      ${renderFilesTab(subject, subjectFiles)}
+      ${renderFilesTab(subjectFiles, plans, selectedPlanId)}
     </div>
 
     <!-- Cards tab (hidden initially) -->
@@ -86,12 +88,25 @@ function renderDetailUI(container, subject, cards, subjectFiles) {
     });
   });
 
-  bindFilesTab(container, subject, subjectFiles, cards);
-  bindCardsTab(container, subject, cards);
+  bindFilesTab(container, subject, cards, plans);
+  bindCardsTab(container, subject, cards, plans);
 }
 
 /* ─── FILES TAB ──────────────────────────────────────────── */
-function renderFilesTab(subject, files) {
+function lessonSelect(plans, id, selected) {
+  if (!plans.length && !selected) return '';
+  return `<div class="form-group">
+    <label class="form-label" for="${id}">اربط البطاقات بدرس (اختياري)</label>
+    <select id="${id}" class="form-select">
+      <option value="">بطاقات للمادة</option>
+      ${selected && !plans.some(plan => plan.id === selected) && id === 'card-lesson'
+        ? `<option value="${escHtml(selected)}" selected>الإبقاء على ربط الدرس الحالي</option>` : ''}
+      ${plans.map(plan => `<option value="${escHtml(plan.id)}" ${plan.id === selected ? 'selected' : ''}>${escHtml(plan.title)}</option>`).join('')}
+    </select>
+  </div>`;
+}
+
+function renderFilesTab(files, plans, selectedPlanId) {
   const fileItems = files.map(f => `
     <div class="file-item" data-file-id="${f.id}">
       <span class="file-icon">${fileIcon(f.name)}</span>
@@ -103,6 +118,7 @@ function renderFilesTab(subject, files) {
   `).join('');
 
   return `
+    ${lessonSelect(plans, 'upload-lesson', selectedPlanId)}
     <!-- Upload zone -->
     <div class="upload-zone" id="upload-zone" tabindex="0" role="button"
          aria-label="رفع ملف جديد">
@@ -127,9 +143,21 @@ function renderFilesTab(subject, files) {
   `;
 }
 
-function bindFilesTab(container, subject, subjectFiles, cards) {
+function bindFilesTab(container, subject, cards, plans) {
   const uploadZone = container.querySelector('#upload-zone');
   const fileInput  = container.querySelector('#file-input');
+  let uploading = false;
+  async function upload(files) {
+    if (uploading || !files.length) return;
+    const planId = container.querySelector('#upload-lesson')?.value;
+    uploading = true;
+    try {
+      await handleFiles(files, container, subject, cards, plans, planId);
+    } finally {
+      uploading = false;
+      hideAIStatus(container);
+    }
+  }
 
   // Drag & drop styling
   uploadZone.addEventListener('dragover', (e) => {
@@ -140,7 +168,7 @@ function bindFilesTab(container, subject, subjectFiles, cards) {
   uploadZone.addEventListener('drop', (e) => {
     e.preventDefault();
     uploadZone.classList.remove('drag-over');
-    handleFiles(Array.from(e.dataTransfer.files), container, subject, subjectFiles, cards);
+    upload(Array.from(e.dataTransfer.files));
   });
 
   uploadZone.addEventListener('keydown', (e) => {
@@ -148,7 +176,7 @@ function bindFilesTab(container, subject, subjectFiles, cards) {
   });
 
   fileInput.addEventListener('change', () => {
-    handleFiles(Array.from(fileInput.files), container, subject, subjectFiles, cards);
+    upload(Array.from(fileInput.files));
     fileInput.value = '';
   });
 
@@ -165,9 +193,7 @@ function bindFilesTab(container, subject, subjectFiles, cards) {
   });
 }
 
-async function handleFiles(rawFiles, container, subject, existingFiles, existingCards) {
-  if (!rawFiles || rawFiles.length === 0) return;
-
+async function handleFiles(rawFiles, container, subject, cards, plans, planId) {
   try {
     await requirePuterConnection();
   } catch (error) {
@@ -190,15 +216,10 @@ async function handleFiles(rawFiles, container, subject, existingFiles, existing
 
       let textContent = extraction.text || '';
 
-      // 2. If image, run الذكاء الاصطناعي OCR
+      // 2. Extract readable text from images before generating questions.
       if (needsVisionOCR(extraction)) {
         showAIStatus(container, `جاري استخراج النص من الصورة…`);
-        try {
-          textContent = await extractTextFromImage(extraction.base64, extraction.mimeType);
-        } catch (ocrErr) {
-          showToast(`فشل OCR للصورة: ${ocrErr.message}`, 'warning');
-          textContent = '';
-        }
+        textContent = await extractTextFromImage(extraction.base64, extraction.mimeType);
       }
 
       // 3. Save file metadata + extracted text
@@ -215,27 +236,22 @@ async function handleFiles(rawFiles, container, subject, existingFiles, existing
       updateFileItemStatus(container, tempId, 'done');
 
       // 4. Generate flashcards if we have text
-      if (textContent.trim().length > 30) {
+      if (textContent.trim().length >= 20) {
         showAIStatus(container, `جاري إنشاء البطاقات التعليمية بالذكاء الاصطناعي…`);
         try {
           const rawCards = await generateFlashcards(textContent, subject.name);
           const newCards = rawCards.map(c => buildCard({
-            front:     c.front,
-            back:      c.back,
+            ...c,
             subjectId: subject.id,
+            planId,
           }));
           await cardsDB.bulkSave(newCards);
+          cards.push(...newCards);
+          repaintCards(container, subject, cards, plans);
           await refreshSubjectCardCount(subject.id);
 
           showToast(`✅ تم إنشاء ${newCards.length} بطاقة من "${file.name}"`, 'success', 5000);
 
-          // Refresh the cards tab without full reload
-          const updatedCards = await cardsDB.getBySubject(subject.id);
-          const tabCards = container.querySelector('#tab-cards');
-          if (tabCards) {
-            tabCards.innerHTML = renderCardsTab(subject, updatedCards);
-            bindCardsTab(container, subject, updatedCards);
-          }
         } catch (aiErr) {
           showToast(`تعذّر إنشاء البطاقات: ${aiErr.message}`, 'error', 7000);
         }
@@ -249,7 +265,6 @@ async function handleFiles(rawFiles, container, subject, existingFiles, existing
     }
   }
 
-  hideAIStatus(container);
 }
 
 function addFileItemToList(container, file, tempId, status) {
@@ -294,7 +309,7 @@ function hideAIStatus(container) {
 
 /* ─── CARDS TAB ──────────────────────────────────────────── */
 function renderCardsTab(subject, cards) {
-  cards.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  cards.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 
   return `
     <div class="page-hd" style="margin-bottom:var(--s6);">
@@ -317,11 +332,13 @@ function renderCardsTab(subject, cards) {
 }
 
 function cardItemHtml(c) {
+  const choices = cardChoices(c);
   return `
     <div class="flashcard-item" data-card-id="${c.id}">
       <div class="flashcard-text" style="flex:1;">
         <div class="front">${escHtml(c.front)}</div>
-        <div class="back">${escHtml(truncate(c.back, 120))}</div>
+        <div class="back">${choices ? escHtml(choices.options[choices.index]) + ' · ' : ''}${escHtml(truncate(c.back, 120))}</div>
+        <span class="stage-badge">${cardTypeLabel(c)}</span>
         <span class="stage-badge">${stageLabel(c)}</span>
         ${c.lapses ? `<span class="lapses-badge" title="عدد الأخطاء">✗ ${c.lapses}</span>` : ''}
       </div>
@@ -333,12 +350,18 @@ function cardItemHtml(c) {
   `;
 }
 
-function bindCardsTab(container, subject, cards) {
+function repaintCards(container, subject, cards, plans) {
+  container.querySelector('#subject-card-count').textContent = cards.length;
+  container.querySelector('#tab-cards').innerHTML = renderCardsTab(subject, cards);
+  bindCardsTab(container, subject, cards, plans);
+}
+
+function bindCardsTab(container, subject, cards, plans) {
   const applyFilters = debounce(() => {
     const q = (container.querySelector('#card-search')?.value || '').trim().toLowerCase();
 
     const filtered = cards.filter(c =>
-      !q || c.front.toLowerCase().includes(q) || c.back.toLowerCase().includes(q)
+      !q || String(c.front || '').toLowerCase().includes(q) || String(c.back || '').toLowerCase().includes(q)
     );
 
     const list = container.querySelector('#cards-list');
@@ -346,26 +369,26 @@ function bindCardsTab(container, subject, cards) {
     list.innerHTML = filtered.length === 0
       ? `<p class="text-muted text-sm" style="padding:var(--s7) 0;">لا توجد نتائج</p>`
       : filtered.map(cardItemHtml).join('');
-    rebindCardActions(container, subject, cards);
+    rebindCardActions(container, subject, cards, plans);
   }, 200);
 
   container.querySelector('#card-search')?.addEventListener('input', applyFilters);
 
   // Add card button
   container.querySelector('#btn-add-card')?.addEventListener('click', () => {
-    openCardModal(container, subject, null, cards);
+    openCardModal(container, subject, null, cards, plans);
   });
 
-  rebindCardActions(container, subject, cards);
+  rebindCardActions(container, subject, cards, plans);
 }
 
-function rebindCardActions(container, subject, cards) {
+function rebindCardActions(container, subject, cards, plans) {
   // Edit
   container.querySelectorAll('[data-action="edit-card"]').forEach(btn => {
     btn.addEventListener('click', () => {
       const id   = btn.dataset.id;
       const card = cards.find(c => c.id === id);
-      if (card) openCardModal(container, subject, card, cards);
+      if (card) openCardModal(container, subject, card, cards, plans);
     });
   });
 
@@ -378,14 +401,14 @@ function rebindCardActions(container, subject, cards) {
       await cardsDB.delete(id);
       const idx = cards.findIndex(c => c.id === id);
       if (idx !== -1) cards.splice(idx, 1);
-      btn.closest('.flashcard-item')?.remove();
+      repaintCards(container, subject, cards, plans);
       await refreshSubjectCardCount(subject.id);
       showToast('تم حذف البطاقة', 'success');
     });
   });
 }
 
-function openCardModal(container, subject, existing, cards) {
+function openCardModal(container, subject, existing, cards, plans) {
   const isEdit = !!existing;
   const backdrop = document.getElementById('modal-form');
   const titleEl  = document.getElementById('modal-form-title');
@@ -408,6 +431,7 @@ function openCardModal(container, subject, existing, cards) {
         placeholder="أدخل الإجابة أو الشرح…">${escHtml(existing?.back || '')}</textarea>
       <span class="form-error" id="back-error">يرجى إدخال ظهر البطاقة.</span>
     </div>
+    ${lessonSelect(plans, 'card-lesson', existing?.planId)}
     <div style="display:flex;gap:var(--s4);justify-content:flex-end;">
       <button class="btn btn-ghost" id="cancel-card-btn">إلغاء</button>
       <button class="btn btn-primary" id="save-card-btn">
@@ -437,11 +461,20 @@ function openCardModal(container, subject, existing, cards) {
     if (!back)  { be.classList.add('visible'); valid = false; } else be.classList.remove('visible');
     if (!valid) return;
 
+    const planId = bodyEl.querySelector('#card-lesson')?.value;
     const card = isEdit
-      ? { ...existing, front, back }
-      : buildCard({ front, back, subjectId: subject.id });
+      ? { ...existing, front, back, planId: planId ?? existing.planId ?? null }
+      : buildCard({ front, back, subjectId: subject.id, planId });
 
-    await cardsDB.save(card);
+    const save = bodyEl.querySelector('#save-card-btn');
+    save.disabled = true;
+    try {
+      await cardsDB.save(card);
+    } catch {
+      save.disabled = false;
+      showToast('تعذّر حفظ البطاقة. حاول مرة أخرى.', 'error');
+      return;
+    }
     await refreshSubjectCardCount(subject.id);
 
     if (isEdit) {
@@ -452,11 +485,7 @@ function openCardModal(container, subject, existing, cards) {
     }
 
     close();
-    const tabCards = container.querySelector('#tab-cards');
-    if (tabCards) {
-      tabCards.innerHTML = renderCardsTab(subject, cards);
-      bindCardsTab(container, subject, cards);
-    }
+    repaintCards(container, subject, cards, plans);
     showToast(isEdit ? 'تم تعديل البطاقة' : 'تم إضافة البطاقة', 'success');
   });
 }

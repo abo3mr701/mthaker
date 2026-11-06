@@ -27,17 +27,20 @@ export async function generateFlashcards(extractedText, subjectName = '') {
 ${contextLine}قم بتحليل النص التالي وإنشاء بطاقات تعليمية شاملة ومفيدة.
 
 المتطلبات:
-- أنشئ ما بين 5 و 25 بطاقة حسب كمية المحتوى.
-- كل بطاقة تحتوي على: سؤال واضح (front) وإجابة مفصّلة (back).
-- الأسئلة والإجابات باللغة العربية.
-- تنوّع الأسئلة: تعريفات، مفاهيم، تطبيقات، مقارنات.
-- لا تكرر المعلومات.
+- أنشئ ما يصل إلى 18 بطاقة بحسب المادة المتاحة، من دون تكرار أو معلومات غير موجودة في النص.
+- وزّع البطاقات بين اختيار من متعدد (mcq)، صح أو خطأ (tf)، وسؤال مقالي (essay). أضف أسئلة قصيرة (text) إذا كانت مفيدة.
+- اكتب أسئلة وإجابات باللغة العربية. استخدم front للسؤال أو العبارة وback للشرح أو الإجابة النموذجية.
+- في mcq اكتب أربعة خيارات مختلفة في options واكتب نص الخيار الصحيح نفسه في answer، وغيّر مكان الخيار الصحيح.
+- في tf اجعل answer إما "صح" أو "خطأ"، واجعل back يشرح السبب ويصحّح العبارة الخاطئة.
+- في essay اجعل back إجابة نموذجية تشرح النقاط التي يُفترض أن يغطيها الطالب.
 - أجب بـ JSON فقط، بدون أي نص إضافي أو علامات Markdown.
 
 صيغة JSON:
 [
-  { "front": "السؤال هنا", "back": "الإجابة التفصيلية هنا" },
-  ...
+  { "type": "mcq", "front": "...", "options": ["أ", "ب", "ج", "د"], "answer": "ب", "back": "..." },
+  { "type": "tf", "front": "...", "answer": "خطأ", "back": "..." },
+  { "type": "essay", "front": "...", "back": "..." },
+  { "type": "text", "front": "...", "back": "..." }
 ]
 
 النص:
@@ -65,14 +68,37 @@ ${extractedText.slice(0, 12000)}
     cards = JSON.parse(match[0]);
   }
 
-  if (!Array.isArray(cards) || cards.length === 0) {
+  const valid = (Array.isArray(cards) ? cards : []).flatMap(card => {
+    const front = typeof card?.front === 'string' ? card.front.trim() : '';
+    const back = typeof card?.back === 'string' ? card.back.trim() : '';
+    if (!front || !back) return [];
+    const answer = typeof card.answer === 'string' ? card.answer.trim() : '';
+
+    switch (card.type) {
+      case 'mcq': {
+        const options = Array.isArray(card.options)
+          ? [...new Set(card.options.filter(option => typeof option === 'string').map(option => option.trim()).filter(Boolean))]
+          : [];
+        return options.length === 4 && options.includes(answer)
+          ? [{ type: 'mcq', front, back, options, answer }] : [];
+      }
+      case 'tf':
+        return ['صح', 'خطأ'].includes(answer) ? [{ type: 'tf', front, back, answer }] : [];
+      case 'essay':
+        return [{ type: 'essay', front, back }];
+      case 'text':
+      case undefined:
+        return [{ type: 'text', front, back }];
+      default:
+        return [];
+    }
+  });
+
+  if (!valid.length) {
     throw new Error('تعذّر إنشاء بطاقات من هذا الرد. تأكد من أن النص يحتوي على محتوى تعليمي.');
   }
 
-  // Validate card structure
-  return cards
-    .filter(c => c && typeof c.front === 'string' && typeof c.back === 'string')
-    .filter(c => c.front.trim().length > 0 && c.back.trim().length > 0);
+  return valid.slice(0, 18);
 }
 
 /* ─── English word insight: translation + AI example sentence ──

@@ -15,8 +15,9 @@
  *    كله في يوم واحد — هذا ما يمنع "الانفجار" في عدد البطاقات المستحقة.
  */
 
-import { todayStr, addDays, uid } from '../utils/helpers.js';
-import { flashcards as cardsDB, history as historyDB, settings } from '../db.js';
+import { addDays, uid } from '../utils/helpers.js';
+import { localStudyDay as todayStr } from './reviewPlanSchedule.js';
+import { flashcards as cardsDB, settings } from '../db.js';
 
 /* ─── Defaults ────────────────────────────────────────────── */
 export const DEFAULT_EASE            = 2.5;
@@ -57,10 +58,14 @@ export async function saveIntervals(intervals) {
 }
 
 /* ─── Build a new flashcard object ───────────────────────── */
-export function buildCard({ front, back, subjectId, category = 'عام', translation = '', example = '' }) {
+export function buildCard({ front, back, subjectId, planId, type, options, answer, category = 'عام', translation = '', example = '' }) {
   return {
     id:           uid(),
     subjectId,
+    ...(planId ? { planId } : {}),
+    ...(type ? { type } : {}),
+    ...(options ? { options } : {}),
+    ...(answer !== undefined ? { answer } : {}),
     category:     category || 'عام',
     front:        (front || '').trim(),
     back:         (back  || '').trim(),
@@ -100,8 +105,7 @@ export async function processReview(card, correct) {
   // stage kept only as a coarse display bucket (0..5) derived from the interval
   const newStage = intervalToStage(newInterval);
 
-  const updated = {
-    ...card,
+  const changes = {
     stage:        newStage,
     ease:         newEase,
     interval:     newInterval,
@@ -112,9 +116,7 @@ export async function processReview(card, correct) {
     correctCount: (card.correctCount || 0) + (correct ? 1 : 0),
   };
 
-  await cardsDB.save(updated);
-
-  await historyDB.save({
+  await cardsDB.saveReview(card.id, changes, {
     id:         uid(),
     cardId:     card.id,
     subjectId:  card.subjectId,
@@ -123,7 +125,7 @@ export async function processReview(card, correct) {
     reviewedAt: new Date().toISOString(),
   });
 
-  return updated;
+  return { ...card, ...changes };
 }
 
 function intervalToStage(days) {

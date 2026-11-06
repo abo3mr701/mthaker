@@ -10,8 +10,9 @@
  * صفحة مستقلة كاملة («الإنجليزية» في القائمة الجانبية) بنظامه الخاص.
  */
 
-import { flashcards as cardsDB, subjects as subjectsDB } from '../db.js';
+import { subjects as subjectsDB } from '../db.js';
 import { processReview, buildTodayQueue, getMaxDailyReviews, setMaxDailyReviews } from '../services/srs.js';
+import { renderReviewCard } from './review-card.js';
 import { showToast, escHtml } from '../utils/helpers.js';
 
 export async function renderStudy(container, subjectId = null) {
@@ -84,6 +85,7 @@ function renderNoDueCards(container, subjects, currentSubjectId, maxDaily, resul
         <p>مراجعة البطاقات التعليمية بنظام التكرار المتباعد</p>
       </div>
       <div class="flex gap-3 wrap">
+        <a href="#cards" class="btn btn-secondary">🃏 كل البطاقات</a>
         ${renderFiltersBar(subjects, currentSubjectId)}
       </div>
     </div>
@@ -117,7 +119,6 @@ function renderSession(container, cards, subjects, currentSubjectId, maxDaily, r
   let index   = 0;
   let correct = 0;
   let wrong   = 0;
-  let flipped = false;
 
   container.innerHTML = `
     <div class="page-hd">
@@ -125,6 +126,7 @@ function renderSession(container, cards, subjects, currentSubjectId, maxDaily, r
         <h2>مراجعة البطاقات</h2>
       </div>
       <div class="flex gap-3 wrap">
+        <a href="#cards" class="btn btn-secondary">🃏 كل البطاقات</a>
         ${renderFiltersBar(subjects, currentSubjectId)}
       </div>
     </div>
@@ -136,31 +138,7 @@ function renderSession(container, cards, subjects, currentSubjectId, maxDaily, r
       <div class="study-progress-fill" id="study-progress" style="width:0%"></div>
     </div>
 
-    <!-- Flip card -->
-    <div class="study-scene" id="study-scene" role="button"
-         tabindex="0" aria-label="انقر لقلب البطاقة">
-      <div class="study-card-inner" id="card-inner">
-        <div class="study-card-face study-card-front">
-          <p class="study-card-text" id="card-front-text" dir="auto"></p>
-          <p class="study-card-hint">انقر للكشف عن الإجابة</p>
-        </div>
-        <div class="study-card-face study-card-back">
-          <p class="study-card-text" id="card-back-text" dir="auto"></p>
-          <p class="study-card-hint">كيف كانت إجابتك؟</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Rating buttons (shown after flip) -->
-    <div class="study-actions" id="study-actions" style="display:none;">
-      <button class="btn btn-wrong" id="btn-wrong">✗ لم أتذكر</button>
-      <button class="btn btn-correct" id="btn-correct">✓ أتذكرتها</button>
-    </div>
-
-    <!-- Keyboard hint -->
-    <p class="text-muted text-xs text-center mt-4">
-      مفتاح المسافة: قلب البطاقة | ← أتذكرت | → لم أتذكر
-    </p>
+    <div id="review-card-slot"></div>
   `;
 
   bindFiltersBar(container, currentSubjectId);
@@ -168,38 +146,14 @@ function renderSession(container, cards, subjects, currentSubjectId, maxDaily, r
 
   function showCard(i) {
     if (i >= total) { showCompletion(); return; }
-    flipped = false;
     const card = cards[i];
-
-    container.querySelector('#card-inner').classList.remove('flipped');
-    container.querySelector('#card-front-text').textContent = card.front;
-    container.querySelector('#card-back-text').innerHTML = escHtml(card.back || '') || '—';
-
-    container.querySelector('#study-actions').style.display = 'none';
-    container.querySelector('#study-counter').textContent   = `البطاقة ${i + 1} من ${total}`;
-    const pct = Math.round((i / total) * 100);
-    container.querySelector('#study-progress').style.width = `${pct}%`;
-  }
-
-  function flipCard() {
-    if (flipped) return;
-    flipped = true;
-    container.querySelector('#card-inner').classList.add('flipped');
-    setTimeout(() => {
-      container.querySelector('#study-actions').style.display = 'flex';
-    }, 350);
-  }
-
-  async function handleRating(isCorrect) {
-    const card = cards[index];
-    try {
+    container.querySelector('#study-counter').textContent = `البطاقة ${i + 1} من ${total}`;
+    container.querySelector('#study-progress').style.width = `${Math.round((i / total) * 100)}%`;
+    renderReviewCard(container.querySelector('#review-card-slot'), card, async isCorrect => {
       await processReview(card, isCorrect);
-    } catch (err) {
-      showToast(`خطأ في حفظ المراجعة: ${err.message}`, 'error');
-    }
-    if (isCorrect) correct++; else wrong++;
-    index++;
-    showCard(index);
+      if (isCorrect) correct++; else wrong++;
+      showCard(++index);
+    });
   }
 
   function showCompletion() {
@@ -234,29 +188,6 @@ function renderSession(container, cards, subjects, currentSubjectId, maxDaily, r
     });
   }
 
-  // Event bindings
-  const scene = container.querySelector('#study-scene');
-  scene.addEventListener('click', flipCard);
-  scene.addEventListener('keydown', (e) => {
-    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); flipCard(); }
-  });
-
-  container.querySelector('#btn-correct').addEventListener('click', () => handleRating(true));
-  container.querySelector('#btn-wrong').addEventListener('click',   () => handleRating(false));
-
-  // Keyboard shortcuts — self-removes once #study-scene leaves the DOM
-  const keyHandler = (e) => {
-    if (!document.getElementById('study-scene')) {
-      document.removeEventListener('keydown', keyHandler);
-      return;
-    }
-    if (e.key === ' ')           { e.preventDefault(); flipCard(); }
-    if (e.key === 'ArrowLeft'  && flipped) handleRating(true);
-    if (e.key === 'ArrowRight' && flipped) handleRating(false);
-  };
-  document.addEventListener('keydown', keyHandler);
-
-  // Show first card
   showCard(0);
 }
 

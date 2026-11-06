@@ -5,7 +5,7 @@
 import { getDashboardStats, history as historyDB, flashcards as cardsDB, reviewPlans as plansDB, englishCards as engCardsDB, settings } from '../db.js';
 import { formatDate, timeAgo, arabicCount, escHtml } from '../utils/helpers.js';
 import { isDue as engIsDue } from '../services/englishSrs.js';
-import { arabicMessageForDay } from '../data/dailyMotivation.js';
+import { arabicMessageForTime, verseForDay } from '../data/dailyMotivation.js';
 import { localStudyDay, scheduleReviewPlans } from '../services/reviewPlanSchedule.js';
 
 export async function renderDashboard(container) {
@@ -26,7 +26,6 @@ export async function renderDashboard(container) {
 
   const today    = new Date().toLocaleDateString('ar-SA', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
   const greeting = getGreeting();
-  const message = arabicMessageForDay(localStudyDay());
 
   container.innerHTML = `
     <!-- Welcome banner -->
@@ -49,13 +48,7 @@ export async function renderDashboard(container) {
       </div>
     </div>
 
-    <section class="dashboard-motivation" aria-label="رسالة اليوم">
-      <p class="text-muted">رسالة اليوم</p>
-      <p class="dashboard-motivation-message">${escHtml(message.text)}</p>
-      ${message.source ? `<a href="${escHtml(message.source)}" target="_blank" rel="noopener noreferrer">${escHtml(message.author)} · مصدر البيت</a>` : ''}
-      <p class="dashboard-motivation-verse">﴿فَإِنَّ مَعَ الْعُسْرِ يُسْرًا﴾</p>
-      <a href="https://quran.com/94/5" target="_blank" rel="noopener noreferrer">سورة الشرح، الآية ٥</a>
-    </section>
+    <section class="dashboard-motivation" aria-label="رسالة اليوم وآية اليوم"></section>
 
     <!-- Stats grid -->
     <div class="stat-grid">
@@ -144,6 +137,8 @@ export async function renderDashboard(container) {
   `;
 
   // Wire up quick-action buttons
+  startMotivation(container.querySelector('.dashboard-motivation'));
+
   container.querySelector('#dash-start-review')?.addEventListener('click', () => {
     window.location.hash = '#study';
   });
@@ -176,6 +171,31 @@ export async function renderDashboard(container) {
   if (window.innerWidth < 680 && grid) {
     grid.style.gridTemplateColumns = '1fr';
   }
+}
+
+function startMotivation(section) {
+  let currentMessage, currentVerse;
+  function refresh() {
+    const now = new Date();
+    const message = arabicMessageForTime(now.getTime());
+    const verse = verseForDay(localStudyDay(now));
+    if (message === currentMessage && verse === currentVerse) return;
+    currentMessage = message;
+    currentVerse = verse;
+
+    section.innerHTML = `
+      <p class="text-muted">رسالة اليوم · ${message.author ? 'مختارات شعرية' : escHtml(message.title)}</p>
+      <p class="dashboard-motivation-message">${escHtml(message.text)}</p>
+      ${message.source ? `<a href="${escHtml(message.source)}" target="_blank" rel="noopener noreferrer">${escHtml(message.author)} · مصدر البيت</a>` : ''}
+      <p class="dashboard-motivation-verse">﴿${escHtml(verse.text)}﴾</p>
+      <a href="https://quran.com/${verse.sura}/${verse.ayah}" target="_blank" rel="noopener noreferrer">سورة ${escHtml(verse.suraName)}، الآية ${verse.ayah.toLocaleString('ar-SA')}</a>
+    `;
+  }
+  refresh();
+  const timer = setInterval(() => {
+    if (section.isConnected) refresh();
+    else clearInterval(timer);
+  }, 15000);
 }
 
 async function renderRecentActivity(recent) {

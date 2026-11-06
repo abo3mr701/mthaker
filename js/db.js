@@ -18,6 +18,7 @@ import {
   query, where, writeBatch, runTransaction,
 } from 'https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js';
 import { sessionTotals } from './services/studyTime.js';
+import { localStudyDay } from './services/reviewPlanSchedule.js';
 
 // أسماء المجموعات (نفس أسماء المخازن القديمة بالضبط)
 const COLLECTIONS = {
@@ -121,20 +122,20 @@ export const flashcards = {
   getAll:          ()            => getAllDocs(COLLECTIONS.CARDS),
   getById:         (id)          => getByIdDoc(COLLECTIONS.CARDS, id),
   getBySubject:    (subjectId)   => getByIndexDocs(COLLECTIONS.CARDS, 'subjectId', subjectId),
+  getByPlan:       (planId)      => getByIndexDocs(COLLECTIONS.CARDS, 'planId', planId),
   save:            (card)        => putDoc(COLLECTIONS.CARDS, card),
   delete:          (id)          => delDoc(COLLECTIONS.CARDS, id),
 
   // subjectId: null/'', or '_' (any subject) | category: null = all categories
   getDueCards: async (subjectId = null, category = null) => {
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const todayStr = today.toISOString().slice(0, 10);
+    const today = localStudyDay();
 
     const all = (subjectId && subjectId !== '_')
       ? await getByIndexDocs(COLLECTIONS.CARDS, 'subjectId', subjectId)
       : await getAllDocs(COLLECTIONS.CARDS);
 
     return all.filter(c =>
-      (!c.nextReview || c.nextReview <= todayStr) &&
+      (!c.nextReview || c.nextReview <= today) &&
       (!category || (c.category || 'عام') === category)
     );
   },
@@ -149,6 +150,12 @@ export const flashcards = {
   },
 
   bulkSave: (cards) => bulkPutDocs(COLLECTIONS.CARDS, cards),
+  saveReview: async (cardId, changes, entry) => {
+    const batch = writeBatch(firestore);
+    batch.update(doc(col(COLLECTIONS.CARDS), cardId), changes);
+    batch.set(doc(col(COLLECTIONS.HISTORY), entry.id), entry);
+    await batch.commit();
+  },
 };
 
 /* ─── Files ───────────────────────────────────────────────── */
@@ -189,7 +196,7 @@ export const history = {
   },
 };
 
-/* ─── Lesson Review Plans (independent of flashcards) ────────
+/* ─── Lesson Review Plans ────────────────────────────────────
  * A "plan" represents one lesson/topic that needs to be revisited
  * on a spaced schedule (e.g. 1, 3, 7, 21, 40 days later).
  * Structure:
@@ -204,6 +211,13 @@ export const reviewPlans = {
   getById:      (id)        => getByIdDoc(COLLECTIONS.PLANS, id),
   getBySubject: (subjectId) => getByIndexDocs(COLLECTIONS.PLANS, 'subjectId', subjectId),
   save:         (plan)      => putDoc(COLLECTIONS.PLANS, plan),
+  move: async (plan, linkedCards) => {
+    const batch = writeBatch(firestore);
+    batch.set(doc(col(COLLECTIONS.PLANS), plan.id), plan);
+    const cards = col(COLLECTIONS.CARDS);
+    linkedCards.forEach(card => batch.update(doc(cards, card.id), { subjectId: plan.subjectId }));
+    await batch.commit();
+  },
   delete:       (id)        => delDoc(COLLECTIONS.PLANS, id),
 };
 
@@ -258,7 +272,7 @@ export async function getDashboardStats() {
     flashcards.getDueCards(),
     reviewPlans.getAll(),
   ]);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localStudyDay();
   const plansDueToday = plans.filter(p => (p.reviews || []).some(r => !r.done && r.dueDate <= today)).length;
   return {
     subjectCount:  allSubjects.length,

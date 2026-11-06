@@ -1,16 +1,10 @@
-/**
- * reviews.js — "المراجعات": خطط مراجعة الدروس (مستقلة تماماً عن الفلاش كاردز)
- *
- * كل "خطة" تمثّل درساً/موضوعاً يحتاج مراجعته على دفعات متباعدة (1، 3، 7، 21، 40 يوماً).
- * كل خطة يمكن ربطها اختيارياً بمادة موجودة — وحينها يظهر زر "إضافة بطاقات" الذي يفتح
- * نفس نافذة إضافة الفلاش كاردز اليدوية (دون حذف أو التأثير على إمكانية إضافتها بشكل منفصل
- * من صفحة المادة نفسها).
- */
+/** Review plans for lessons and their linked flashcards. */
 
 import { reviewPlans as plansDB, subjects as subjectsDB, flashcards as cardsDB, settings } from '../db.js';
 import { buildCard, processReview } from '../services/srs.js';
 import { uid, showToast, showConfirm, escHtml, addDays } from '../utils/helpers.js';
 import { refreshSubjectCardCount } from './subjects.js';
+import { renderReviewCard } from './review-card.js';
 import { localStudyDay as todayStr, nextReviewDay, planLimit, scheduleReviewPlans } from '../services/reviewPlanSchedule.js';
 
 const DEFAULT_OFFSETS = [1, 3, 7, 21, 40];
@@ -79,7 +73,7 @@ function renderUI(container) {
     <div class="page-hd">
       <div class="page-hd-text">
         <h2>المراجعات</h2>
-        <p>${_allPlans.length ? `${_allPlans.length} خطة مراجعة` : 'خطط مراجعة الدروس — مستقلة عن البطاقات التعليمية'}</p>
+        <p>${_allPlans.length ? `${_allPlans.length} خطة مراجعة` : 'خطط مراجعة الدروس وبطاقاتها'}</p>
       </div>
       <button class="btn btn-primary" id="btn-new-plan">➕ درس جديد للمراجعة</button>
     </div>
@@ -218,6 +212,8 @@ function renderPlanCard(plan, filterDate) {
 
       <div class="review-plan-actions">
         <button class="btn btn-sm btn-secondary" data-action="edit-plan" data-plan="${plan.id}">✏️ تعديل الدرس</button>
+        ${linkedCards.length ? `<a class="btn btn-sm btn-secondary" href="#cards/${encodeURIComponent(plan.id)}">كل بطاقات الدرس (${linkedCards.length})</a>` : ''}
+        ${subject ? `<a class="btn btn-sm btn-secondary" href="#subject/${encodeURIComponent(subject.id)}/lesson/${encodeURIComponent(plan.id)}">رفع صورة للدرس</a>` : ''}
         ${subject
           ? `<button class="btn btn-sm btn-primary" data-action="add-card" data-plan="${plan.id}">🃏 إضافة فلاش كاردز لهذا الدرس</button>`
           : `<button class="btn btn-sm btn-ghost" disabled title="اربط الدرس بمادة أولاً من زر «تعديل الدرس»">🃏 إضافة فلاش كاردز (اربط بمادة أولاً)</button>`}
@@ -276,7 +272,7 @@ function bindPlanCardEvents(container) {
     const reviewCardsBtn = e.target.closest('[data-action="review-cards"]');
     if (reviewCardsBtn) {
       const plan = _allPlans.find(p => p.id === reviewCardsBtn.dataset.plan);
-      if (plan) openLessonCardsSession(container, plan);
+      if (plan) await openLessonCardsSession(container, plan);
       return;
     }
   });
@@ -324,84 +320,53 @@ async function toggleReview(container, planId, reviewId) {
   }
 }
 
-/* ─── Mini review session for a lesson's linked flashcards ─────────
- * Launched from the "🃏 راجع البطاقات" button on a plan card. Goes through
- * every flashcard linked to this specific lesson (not the whole subject,
- * and not limited by the general daily cap), using the normal SRS grading
- * (processReview) so scheduling stays consistent with "بطاقات المراجعة".
- * Once all of them are cleared, the plan's checkboxes unlock automatically.
- * ──────────────────────────────────────────────────────────────── */
-function openLessonCardsSession(container, plan) {
-  const cards = _allCards.filter(c => c.planId === plan.id && isCardDue(c));
-  if (cards.length === 0) { renderUI(container); return; }
+async function openLessonCardsSession(container, plan) {
+  let linked;
+  try {
+    linked = await cardsDB.getByPlan(plan.id);
+  } catch {
+    showToast('تعذّر تحميل بطاقات الدرس.', 'error');
+    return;
+  }
+  _allCards = _allCards.filter(card => card.planId !== plan.id).concat(linked);
+  if (!linked.length) { renderUI(container); return; }
 
+  const due = linked.filter(isCardDue);
+  const practice = due.length === 0;
+  const queue = practice ? linked : due;
   let index = 0;
-  let flipped = false;
+
+  container.innerHTML = `
+    <div class="page-hd">
+      <div class="page-hd-text">
+        <h2>بطاقات درس: ${escHtml(plan.title)}</h2>
+        <p>${practice ? 'تدرّب على البطاقات المحفوظة' : 'مراجعة البطاقات المستحقة'}</p>
+      </div>
+      <button class="btn btn-secondary" id="lesson-session-exit">← رجوع للمراجعات</button>
+    </div>
+    <p class="study-counter" id="lesson-counter"></p>
+    <div id="lesson-card-slot"></div>
+  `;
+  container.querySelector('#lesson-session-exit').addEventListener('click', () => renderUI(container));
+  showCard();
 
   function showCard() {
-    if (index >= cards.length) { finish(); return; }
-    const card = cards[index];
-    flipped = false;
-    container.innerHTML = `
-      <div class="page-hd">
-        <div class="page-hd-text">
-          <h2>🃏 بطاقات درس: ${escHtml(plan.title)}</h2>
-          <p>بطاقة ${index + 1} من ${cards.length}</p>
-        </div>
-        <button class="btn btn-secondary" id="lesson-session-exit">← رجوع للمراجعات</button>
-      </div>
-      <div class="study-progress-bar" style="margin-bottom:var(--s6);">
-        <div class="study-progress-fill" style="width:${Math.round((index / cards.length) * 100)}%"></div>
-      </div>
-      <div class="study-scene" id="lesson-scene" role="button" tabindex="0">
-        <div class="study-card-inner" id="lesson-card-inner">
-          <div class="study-card-face study-card-front">
-            <p class="study-card-text" dir="auto">${escHtml(card.front)}</p>
-            <p class="study-card-hint">انقر للكشف عن الإجابة</p>
-          </div>
-          <div class="study-card-face study-card-back">
-            <p class="study-card-text" dir="auto">${escHtml(card.back || '')}</p>
-            <p class="study-card-hint">كيف كانت إجابتك؟</p>
-          </div>
-        </div>
-      </div>
-      <div class="study-actions" id="lesson-actions" style="display:none;">
-        <button class="btn btn-wrong" id="lesson-btn-wrong">✗ لم أتذكر</button>
-        <button class="btn btn-correct" id="lesson-btn-correct">✓ أتذكرتها</button>
-      </div>
-    `;
-
-    const scene = container.querySelector('#lesson-scene');
-    const inner = container.querySelector('#lesson-card-inner');
-    const actions = container.querySelector('#lesson-actions');
-
-    scene.addEventListener('click', () => {
-      if (flipped) return;
-      flipped = true;
-      inner.classList.add('flipped');
-      setTimeout(() => { actions.style.display = 'flex'; }, 300);
+    const card = queue[index];
+    container.querySelector('#lesson-counter').textContent = `البطاقة ${index + 1} من ${queue.length}`;
+    const slot = container.querySelector('#lesson-card-slot');
+    renderReviewCard(slot, card, async correct => {
+      if (!practice) {
+        const updated = await processReview(card, correct);
+        _allCards = _allCards.map(item => item.id === card.id ? updated : item);
+      }
+      if (!slot.isConnected) return;
+      if (++index < queue.length) showCard();
+      else {
+        renderUI(container);
+        showToast(practice ? 'أنهيت التدريب على بطاقات الدرس' : 'أنهيت بطاقات الدرس المستحقة', 'success');
+      }
     });
-
-    container.querySelector('#lesson-session-exit').addEventListener('click', () => renderUI(container));
-
-    container.querySelector('#lesson-btn-correct').addEventListener('click', () => rate(card, true));
-    container.querySelector('#lesson-btn-wrong').addEventListener('click', () => rate(card, false));
   }
-
-  async function rate(card, correct) {
-    await processReview(card, correct);
-    index += 1;
-    showCard();
-  }
-
-  async function finish() {
-    // Re-fetch cards so due/lapse state is accurate before returning to the grid
-    _allCards = await cardsDB.getAll();
-    showToast('أنهيت بطاقات هذا الدرس ✓ — تقدر تحدّد المراجعة كمكتملة الآن', 'success');
-    renderUI(container);
-  }
-
-  showCard();
 }
 
 // Manual date override — editable directly from the review box itself, at any time
@@ -533,11 +498,30 @@ function openPlanModal(container, existing = null) {
     errEl.classList.remove('visible');
 
     if (isEdit) {
-      existing.title     = title;
-      existing.category  = category;
-      existing.subjectId = subjectId;
-      existing.pages     = pages;
-      await plansDB.save(existing);
+      const save = bodyEl.querySelector('#save-plan-btn');
+      save.disabled = true;
+      const edited = { ...existing, title, category, subjectId, pages };
+      try {
+        if (subjectId !== existing.subjectId) {
+          const linked = await cardsDB.getByPlan(existing.id);
+          if (!subjectId && linked.length) {
+            showToast('اختر مادة للدرس قبل نقله لأن فيه بطاقات مرتبطة.', 'warning');
+            save.disabled = false;
+            return;
+          }
+          await plansDB.move(edited, linked);
+          const moved = new Set(linked.map(card => card.id));
+          _allCards = _allCards.map(card => moved.has(card.id) ? { ...card, subjectId } : card);
+          await Promise.all([existing.subjectId, subjectId].filter(Boolean).map(refreshSubjectCardCount));
+        } else {
+          await plansDB.save(edited);
+        }
+        _allPlans = _allPlans.map(plan => plan.id === edited.id ? edited : plan);
+      } catch {
+        save.disabled = false;
+        showToast('تعذّر حفظ الدرس وبطاقاته. حاول مرة أخرى.', 'error');
+        return;
+      }
     } else {
       const createdAt = bodyEl.querySelector('#plan-start-date')?.value || todayStr();
       const plan = {
@@ -611,14 +595,20 @@ function openQuickCardModal(container, plan) {
     if (!front) { bodyEl.querySelector('#qc-front-error').classList.add('visible'); return; }
     if (!back)  { bodyEl.querySelector('#qc-back-error').classList.add('visible'); return; }
 
-    const card = buildCard({ front, back, subjectId: plan.subjectId, category: 'عام' });
-    card.planId = plan.id; // يربط البطاقة بهذا الدرس تحديداً (لبوابة "أنهِ البطاقات أولاً")
-
-    await cardsDB.save(card);
+    const card = buildCard({ front, back, subjectId: plan.subjectId, planId: plan.id });
+    const save = bodyEl.querySelector('#qc-save');
+    save.disabled = true;
+    try {
+      await cardsDB.save(card);
+    } catch {
+      showToast('تعذّر حفظ البطاقة. حاول مرة أخرى.', 'error');
+      save.disabled = false;
+      return;
+    }
     _allCards.push(card);
     await refreshSubjectCardCount(plan.subjectId);
     close();
     renderUI(container);
-    showToast('تمت إضافة البطاقة إلى المادة المرتبطة بالدرس', 'success');
+    showToast('تمت إضافة البطاقة إلى الدرس وقائمة البطاقات', 'success');
   });
 }

@@ -629,6 +629,15 @@ body.sidebar-collapsed .sidebar { display: none; }
   transition: width .4s ease;
 }
 .study-counter { text-align:center; margin-bottom:var(--s5); color:var(--text3); font-size:.9rem; }
+.review-question { max-width: 640px; margin: 0 auto var(--s8); display: grid; gap: var(--s5); }
+.review-question h3, .review-question p { overflow-wrap: anywhere; white-space: pre-wrap; }
+.review-question .stage-badge { justify-self: start; }
+.review-question > .btn { justify-self: start; }
+.review-options { display: grid; gap: var(--s3); }
+.review-options .btn { white-space: normal; text-align: start; justify-content: flex-start; }
+.review-options .review-option-correct { background: var(--success-soft); color: var(--success); opacity: 1; }
+.review-options .review-option-wrong { background: var(--danger-soft); color: var(--danger); opacity: 1; }
+.review-question [data-feedback] > * { margin-bottom: var(--s4); }
 
 /* ── 14. File Upload Area ──────────────────────────────── */
 .upload-zone {
