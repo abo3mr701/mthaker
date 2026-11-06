@@ -34,12 +34,14 @@ test('already completed checkpoints consume slots even when scheduling for the f
   assert.equal(plans[0].reviews[1].dueDate, tomorrow);
 });
 
-test('home shuffles 50 messages across two-hour slots and changes verses each day', () => {
-  const messages = Array.from({ length: 50 }, (_, index) => arabicMessageForTime(index * MESSAGE_PERIOD_MS));
-  assert.equal(new Set(messages.map(message => message.text)).size, 50);
-  assert.equal(messages.filter(message => message.author && message.source).length, 10);
+test('home rotates 60 sourced poems and 40 reflections and changes Quran verses each day', () => {
+  const messages = Array.from({ length: 100 }, (_, index) => arabicMessageForTime(index * MESSAGE_PERIOD_MS));
+  assert.equal(new Set(messages.map(message => message.text)).size, 100);
+  const poetry = messages.filter(message => message.author && message.source);
+  assert.equal(poetry.length, 60);
+  assert.ok(poetry.every(message => message.text.split('\n').length === 2 && new URL(message.source).protocol === 'https:'));
   assert.equal(arabicMessageForTime(MESSAGE_PERIOD_MS - 1), messages[0]);
-  assert.notEqual(arabicMessageForTime(50 * MESSAGE_PERIOD_MS), messages.at(-1));
+  assert.notEqual(arabicMessageForTime(100 * MESSAGE_PERIOD_MS), messages.at(-1));
   assert.notEqual(verseForDay(today), verseForDay(tomorrow));
   assert.notEqual(englishMessageForDay(today), englishMessageForDay(tomorrow));
 });

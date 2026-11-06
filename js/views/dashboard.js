@@ -186,7 +186,7 @@ function startMotivation(section) {
     section.innerHTML = `
       <p class="text-muted">رسالة اليوم · ${message.author ? 'مختارات شعرية' : escHtml(message.title)}</p>
       <p class="dashboard-motivation-message">${escHtml(message.text)}</p>
-      ${message.source ? `<a href="${escHtml(message.source)}" target="_blank" rel="noopener noreferrer">${escHtml(message.author)} · مصدر البيت</a>` : ''}
+      ${message.author ? `<p class="text-muted">${escHtml(message.author)}</p>` : ''}
       <p class="dashboard-motivation-verse">﴿${escHtml(verse.text)}﴾</p>
       <a href="https://quran.com/${verse.sura}/${verse.ayah}" target="_blank" rel="noopener noreferrer">سورة ${escHtml(verse.suraName)}، الآية ${verse.ayah.toLocaleString('ar-SA')}</a>
     `;

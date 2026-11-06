@@ -6,13 +6,14 @@ import { localStudyDay } from '../js/services/reviewPlanSchedule.js';
 const dataUrl = source => 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
 const source = path => readFile(new URL(path, import.meta.url), 'utf8');
 
-test('a new lesson card is visible today and grading preserves its lesson and question', async () => {
+test('lesson cards can be reviewed or deleted without affecting the other cards', async () => {
   process.env.TZ = 'Asia/Riyadh';
   const docs = new Map();
   globalThis.lessonCardStore = {
     collection: (_db, ...parts) => parts.join('/'),
     doc: (col, id) => col + '/' + id,
     setDoc: async (key, record) => docs.set(key, record),
+    deleteDoc: async key => docs.delete(key),
     query: (col, constraint) => ({ col, constraint }),
     where: (field, _, value) => ({ field, value }),
     getDocs: async (ref) => {
@@ -30,7 +31,7 @@ test('a new lesson card is visible today and grading preserves its lesson and qu
       };
     },
   };
-  const firestore = dataUrl('export const { collection, doc, setDoc, query, where, getDocs, writeBatch } = globalThis.lessonCardStore; export const getDoc=()=>{}, deleteDoc=()=>{}, runTransaction=()=>{};');
+  const firestore = dataUrl('export const { collection, doc, setDoc, query, where, getDocs, writeBatch, deleteDoc } = globalThis.lessonCardStore; export const getDoc=()=>{}, runTransaction=()=>{};');
   const schedule = new URL('../js/services/reviewPlanSchedule.js', import.meta.url).href;
   const dbSource = (await source('../js/db.js'))
     .replace('./services/firebase.js', dataUrl('export const auth={ currentUser:{uid:"test-user"} }, firestore={};'))
@@ -50,6 +51,42 @@ test('a new lesson card is visible today and grading preserves its lesson and qu
   assert.deepEqual(await flashcards.getByPlan('algebra'), [card]);
   assert.deepEqual(await flashcards.getBySubject('math'), [card]);
   assert.deepEqual(await flashcards.getDueCards(), [card]);
+
+  const extra = buildCard({ front: 'بطاقة للحذف', back: 'إجابة', subjectId: 'math', planId: 'algebra' });
+  await flashcards.save(extra);
+  const ui = { confirm: false, toasts: [], refreshed: [] };
+  globalThis.lessonLibraryUI = ui;
+  const helpers = dataUrl(`
+    export { escHtml } from '${new URL('../js/utils/helpers.js', import.meta.url).href}';
+    export const showConfirm = async () => globalThis.lessonLibraryUI.confirm;
+    export const showToast = (text, type) => globalThis.lessonLibraryUI.toasts.push([text, type]);
+  `);
+  const reviewCard = dataUrl((await source('../js/views/review-card.js')).replace('../utils/helpers.js', helpers));
+  const { renderCardLibrary } = await import(dataUrl((await source('../js/views/card-library.js'))
+    .replace('../db.js', dbUrl)
+    .replace('../services/reviewPlanSchedule.js', schedule)
+    .replace('../utils/helpers.js', helpers)
+    .replace('./review-card.js', reviewCard)
+    .replace('./subjects.js', dataUrl('export const refreshSubjectCardCount = async id => globalThis.lessonLibraryUI.refreshed.push(id);'))));
+  const list = { addEventListener: (_type, fn) => { list.click = fn; } };
+  const count = {};
+  const elements = { '#library-cards': list, '#library-count': count, '#library-search': { value: '', addEventListener() {} } };
+  const container = { querySelector: selector => elements[selector] };
+  await renderCardLibrary(container, 'algebra');
+  assert.match(list.innerHTML, /بطاقة للحذف/);
+  const button = { dataset: { deleteCard: extra.id } };
+  const click = { target: { closest: () => button } };
+  await list.click(click);
+  assert.deepEqual(await flashcards.getByPlan('algebra'), [card, extra]);
+  ui.confirm = true;
+  await list.click(click);
+  assert.doesNotMatch(list.innerHTML, /بطاقة للحذف/);
+  assert.equal(count.textContent, '1 بطاقة · 1 مستحقة');
+  assert.deepEqual(await flashcards.getBySubject('math'), [card]);
+  assert.deepEqual(await flashcards.getByPlan('algebra'), [card]);
+  assert.deepEqual(await flashcards.getDueCards(), [card]);
+  assert.deepEqual(ui.refreshed, ['math']);
+  assert.equal(ui.toasts.at(-1)?.[1], 'success');
 
   const updated = await processReview(card, false);
   assert.deepEqual(await flashcards.getDueCards(), []);
