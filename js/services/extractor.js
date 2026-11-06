@@ -3,7 +3,7 @@
  *
  * Supports:
  *  - PDF  → PDF.js (text layer, page by page)
- *  - Images (PNG, JPG, JPEG, WEBP, GIF) → base64 for Gemini Vision OCR
+ *  - Images (PNG, JPG, JPEG, WEBP, GIF) → base64 for OCR
  *  - TXT / plain text files → direct read
  *
  * Returns: { text, base64, mimeType, method }
@@ -83,7 +83,7 @@ async function extractFromImage(file) {
   const mimeType = header.match(/:(.*?);/)?.[1] || file.type;
 
   return {
-    text:     null,         // Text will be filled by Gemini OCR
+    text:     null,         // Text will be filled by OCR
     base64,
     mimeType,
     method:   'gemini-vision',
@@ -134,7 +134,7 @@ export async function extractFileContent(file) {
   }
 }
 
-/* ─── Check if a file needs Gemini Vision for OCR ────────── */
+/* ─── Check if a file needs image OCR ────────── */
 export function needsVisionOCR(extractionResult) {
   return extractionResult.method === 'gemini-vision';
 }

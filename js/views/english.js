@@ -15,7 +15,7 @@ import { localStudyDay } from '../services/reviewPlanSchedule.js';
 import { generateDailyQueue, buildReviewQueue } from '../services/englishQueue.js';
 import { mergeVocabulary, normalizeWord, activeWordKeys } from '../services/englishVocabulary.js';
 import { renderEnglishCatalog, creditHtml } from './englishCatalog.js';
-import { generateEnglishWordEntry, askAboutWord, extractEnglishWordList, extractTextFromImage } from '../services/gemini.js';
+import { generateEnglishWordEntry, askAboutWord, extractEnglishWordList, extractTextFromImage } from '../services/studyAI.js';
 import { extractFileContent, needsVisionOCR, validateFile } from '../services/extractor.js';
 import { uid, showToast, escHtml, todayStr } from '../utils/helpers.js';
 
@@ -545,14 +545,12 @@ function openAskAiModal(word) {
   bodyEl.querySelector('#eng-ai-send').addEventListener('click', async () => {
     const q = bodyEl.querySelector('#eng-ai-question').value.trim();
     if (!q) { showToast('اكتب سؤالك أولاً', 'warning'); return; }
-    const apiKey = await settings.get('geminiApiKey');
-    if (!apiKey) { showToast('أدخل مفتاح Gemini API في الإعدادات أولاً', 'warning', 5000); return; }
 
     const btn = bodyEl.querySelector('#eng-ai-send');
     const answerEl = bodyEl.querySelector('#eng-ai-answer');
     btn.disabled = true; btn.textContent = '⏳ جاري التفكير…';
     try {
-      answerEl.textContent = await askAboutWord(apiKey, word, q);
+      answerEl.textContent = await askAboutWord(word, q);
     } catch (err) {
       showToast(err.message, 'error', 6000);
     } finally {
@@ -788,13 +786,11 @@ function openAddWordModal(container) {
     const word = bodyEl.querySelector('#w-word').value.trim();
     if (!word) { showToast('اكتب الكلمة أولاً', 'warning'); return; }
     const bundled = S.wordBank.find(entry => entry.isOxford && normalizeWord(entry.word) === normalizeWord(word));
-    const apiKey = bundled ? '' : await settings.get('geminiApiKey');
-    if (!bundled && !apiKey) { showToast('أدخل مفتاح Gemini API في الإعدادات أولاً', 'warning', 5000); return; }
 
     const btn = bodyEl.querySelector('#w-ai-btn');
     btn.disabled = true; const original = btn.textContent; btn.textContent = '⏳ جاري التوليد…';
     try {
-      const entry = bundled || await generateEnglishWordEntry(apiKey, word);
+      const entry = bundled || await generateEnglishWordEntry(word);
       bodyEl.querySelector('#w-level').value = entry.level;
       bodyEl.querySelector('#w-pos').value = entry.pos;
       bodyEl.querySelector('#w-ar').value = entry.ar;
@@ -874,8 +870,8 @@ async function addWordToDeck(newWord) {
 
 /* ─── Import candidate words from an uploaded file/image ──────────
  * Reuses the exact same extraction pipeline as the "المواد الدراسية"
- * file upload (extractFileContent → OCR if needed via Gemini Vision),
- * then asks Gemini for a clean word list. The user reviews a checklist
+ * file upload (extractFileContent → OCR if needed via الذكاء الاصطناعي),
+ * then asks the assistant for a clean word list. The user reviews a checklist
  * (all pre-checked) before anything is added — uncheck to skip a word,
  * or leave everything checked to add the full extracted list at once.
  * ──────────────────────────────────────────────────────────────── */
@@ -925,9 +921,6 @@ async function processImportFile(container, bodyEl, file) {
   const validation = validateFile(file);
   if (!validation.ok) { showToast(validation.error, 'error'); return; }
 
-  const apiKey = await settings.get('geminiApiKey');
-  if (!apiKey) { showToast('أدخل مفتاح Gemini API في الإعدادات أولاً', 'warning', 5000); return; }
-
   try {
     statusEl.textContent = `⏳ جاري معالجة: ${file.name}…`;
     const extraction = await extractFileContent(file);
@@ -935,7 +928,7 @@ async function processImportFile(container, bodyEl, file) {
 
     if (needsVisionOCR(extraction)) {
       statusEl.textContent = '⏳ جاري استخراج النص من الصورة…';
-      textContent = await extractTextFromImage(apiKey, extraction.base64, extraction.mimeType);
+      textContent = await extractTextFromImage(extraction.base64, extraction.mimeType);
     }
 
     if (!textContent.trim()) {
@@ -944,7 +937,7 @@ async function processImportFile(container, bodyEl, file) {
     }
 
     statusEl.textContent = '⏳ جاري استخراج الكلمات الإنجليزية بالذكاء الاصطناعي…';
-    const words = await extractEnglishWordList(apiKey, textContent);
+    const words = await extractEnglishWordList(textContent);
 
     if (words.length === 0) {
       statusEl.textContent = '⚠️ ما لقيت كلمات إنجليزية مناسبة بهذا الملف.';
@@ -990,7 +983,6 @@ function renderImportChecklist(container, bodyEl, resultsEl, words) {
     const selected = Array.from(resultsEl.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.dataset.word);
     if (selected.length === 0) { showToast('اختر كلمة واحدة على الأقل', 'warning'); return; }
 
-    const apiKey = await settings.get('geminiApiKey');
     const btn = resultsEl.querySelector('#imp-add-selected');
     const progressEl = resultsEl.querySelector('#imp-progress');
     btn.disabled = true;
@@ -1005,11 +997,12 @@ function renderImportChecklist(container, bodyEl, resultsEl, words) {
         continue;
       }
       try {
-        const entry = await generateEnglishWordEntry(apiKey, word);
+        const entry = await generateEnglishWordEntry(word);
         if (await addWordToDeck(buildCustomWord({ word, ...entry }))) added++;
-      } catch {
-        // Fallback: add with minimal info if AI enrichment fails for this word
-        if (await addWordToDeck(buildCustomWord({ word, pos: '', level: 'A1', ar: '', definition: '', examples: {} }))) added++;
+      } catch (error) {
+        progressEl.textContent = `أضيفت ${added} كلمة قبل توقّف الإضافة. ${error.message}`;
+        btn.disabled = false;
+        return;
       }
     }
 

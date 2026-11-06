@@ -2,21 +2,25 @@
  * chat.js — AI Chat with image upload + fixed system prompt display
  */
 
-import { subjects as subjectsDB, files as filesDB, settings } from '../db.js';
-import { chat as geminiChat, extractTextFromImage } from '../services/gemini.js';
+import { subjects as subjectsDB, files as filesDB } from '../db.js';
+import { chat as studyChat, extractTextFromImage } from '../services/studyAI.js';
+import { connectPuter, disconnectPuter, hasPuterConnection, loadPuter } from '../services/puterAI.js';
 import { escHtml, uid, showToast } from '../utils/helpers.js';
 
 let conversationHistory = [];
-let currentSubjectId    = null;
-let subjectContextCache = '';
+
+export function resetChat() {
+  conversationHistory = [];
+}
 
 export async function renderChat(container) {
   container.innerHTML = `<div class="flex-center" style="padding:var(--s10)"><div class="spinner"></div></div>`;
+  if (!await hasPuterConnection().catch(() => false)) {
+    renderConnect(container);
+    return;
+  }
 
-  const [apiKey, subjects] = await Promise.all([
-    settings.get('geminiApiKey'),
-    subjectsDB.getAll(),
-  ]);
+  const subjects = await subjectsDB.getAll();
 
   const subjectOptions = subjects.map(s =>
     `<option value="${s.id}">${escHtml(s.name)}</option>`
@@ -28,17 +32,12 @@ export async function renderChat(container) {
         <h2>المساعد الذكي</h2>
         <p>اسأل عن أي موضوع أو استعن بمحتوى مادة دراسية</p>
       </div>
-      <button class="btn btn-ghost btn-sm" id="clear-chat-btn">🗑️ محو</button>
+      <div>
+        <button class="btn btn-ghost btn-sm" id="disconnect-puter-btn">فصل Puter</button>
+        <button class="btn btn-ghost btn-sm" id="clear-chat-btn">🗑️ محو</button>
+      </div>
     </div>
 
-    ${!apiKey ? `
-      <div class="empty-state">
-        <div class="empty-icon">🔑</div>
-        <h3 class="empty-title">مفتاح API مطلوب</h3>
-        <p class="empty-sub">أدخل مفتاح Gemini API في الإعدادات لاستخدام المساعد الذكي.</p>
-        <a href="#settings" class="btn btn-primary">⚙️ الإعدادات</a>
-      </div>
-    ` : `
       <!-- Context bar -->
       <div class="chat-context-bar">
         <span class="chat-context-label">📚 السياق:</span>
@@ -76,10 +75,7 @@ export async function renderChat(container) {
           <button class="chat-send-btn" id="chat-send" aria-label="إرسال">➤</button>
         </div>
       </div>
-    `}
   `;
-
-  if (!apiKey) return;
 
   const messagesEl  = container.querySelector('#chat-messages');
   const inputEl     = container.querySelector('#chat-input');
@@ -92,22 +88,27 @@ export async function renderChat(container) {
   const imgPreviewThumb = container.querySelector('#img-preview-thumb');
   const imgPreviewName  = container.querySelector('#img-preview-name');
   const removeImgBtn    = container.querySelector('#remove-img-btn');
+  const disconnectBtn   = container.querySelector('#disconnect-puter-btn');
 
   let pendingImageBase64 = null;
   let pendingImageMime   = null;
   let pendingImageName   = null;
+  let subjectContext = '';
 
   // Subject context
   contextSel?.addEventListener('change', async () => {
-    currentSubjectId    = contextSel.value || null;
-    subjectContextCache = '';
-    if (currentSubjectId) {
+    const subjectId = contextSel.value;
+    subjectContext = '';
+    if (subjectId) {
       contextStat.textContent = 'جاري تحميل السياق…';
       try {
-        subjectContextCache = await loadContext(currentSubjectId);
-        const subj = await subjectsDB.getById(currentSubjectId);
-        contextStat.textContent = `✓ ${subj?.name} (${subjectContextCache.length.toLocaleString()} حرف)`;
-      } catch { contextStat.textContent = 'فشل تحميل السياق'; }
+        const context = await loadContext(subjectId);
+        if (contextSel.value !== subjectId) return;
+        subjectContext = context;
+        contextStat.textContent = `✓ ${context.length.toLocaleString()} حرف`;
+      } catch {
+        if (contextSel.value === subjectId) contextStat.textContent = 'فشل تحميل السياق';
+      }
     } else {
       contextStat.textContent = '';
     }
@@ -143,10 +144,15 @@ export async function renderChat(container) {
     inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + 'px';
   });
 
-  sendBtn.addEventListener('click', () => sendMsg(messagesEl, inputEl, apiKey,
-    pendingImageBase64, pendingImageMime, pendingImageName,
-    () => { pendingImageBase64=pendingImageMime=pendingImageName=null; imgPreviewBar.style.display='none'; }
-  ));
+  sendBtn.addEventListener('click', async () => {
+    sendBtn.disabled = clearBtn.disabled = disconnectBtn.disabled = true;
+    try {
+      await sendMsg(messagesEl, inputEl, subjectContext, pendingImageBase64, pendingImageMime, pendingImageName,
+        () => { pendingImageBase64=pendingImageMime=pendingImageName=null; imgPreviewBar.style.display='none'; });
+    } finally {
+      sendBtn.disabled = clearBtn.disabled = disconnectBtn.disabled = false;
+    }
+  });
 
   inputEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -160,10 +166,73 @@ export async function renderChat(container) {
     messagesEl.innerHTML = welcomeMsg();
   });
 
+  disconnectBtn.addEventListener('click', async () => {
+    disconnectBtn.disabled = sendBtn.disabled = true;
+    try {
+      await disconnectPuter();
+      resetChat();
+      renderConnect(container);
+    } catch {
+      showToast('تعذّر فصل Puter. حاول مرة أخرى.', 'error');
+      disconnectBtn.disabled = sendBtn.disabled = false;
+    }
+  });
+
   scrollBottom(messagesEl);
 }
 
-async function sendMsg(messagesEl, inputEl, apiKey, imgBase64, imgMime, imgName, clearImg) {
+function renderConnect(container) {
+  container.innerHTML = `
+    <div class="page-hd">
+      <div class="page-hd-text">
+        <h2>المساعد الذكي</h2>
+        <p>اسأل عن دروسك أو استخرج النص من الصور</p>
+      </div>
+    </div>
+    <div class="empty-state">
+      <div class="empty-icon" aria-hidden="true">🤖</div>
+      <h3 class="empty-title">فعّل مساعدك الذكي</h3>
+      <p class="empty-sub">اربط حسابك في Puter مرة واحدة على هذا المتصفح. طلباتك تُحتسب من رصيد حسابك.</p>
+      <p class="text-muted text-sm mb-4">تُرسل أسئلتك والصور والمحتوى الدراسي الذي تختاره إلى Puter لمعالجتها.</p>
+      <button class="btn btn-primary" id="connect-puter-btn" disabled>ربط حساب Puter</button>
+      <p id="puter-connect-status" class="text-muted text-sm" role="status"></p>
+    </div>`;
+  const button = container.querySelector('#connect-puter-btn');
+  const status = container.querySelector('#puter-connect-status');
+  let ready = false;
+
+  async function prepare() {
+    button.disabled = true;
+    status.textContent = 'جاري تجهيز الربط…';
+    try {
+      await loadPuter();
+      ready = true;
+      status.textContent = '';
+      button.textContent = 'ربط حساب Puter';
+    } catch (error) {
+      status.textContent = error.message;
+      button.textContent = 'إعادة المحاولة';
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  button.addEventListener('click', async () => {
+    if (!ready) return prepare();
+    button.disabled = true;
+    status.textContent = 'أكمل تسجيل الدخول في نافذة Puter.';
+    try {
+      await connectPuter();
+      await renderChat(container);
+    } catch (error) {
+      status.textContent = error.message;
+      button.disabled = false;
+    }
+  });
+  prepare();
+}
+
+async function sendMsg(messagesEl, inputEl, context, imgBase64, imgMime, imgName, clearImg) {
   const text = inputEl.value.trim();
   if (!text && !imgBase64) return;
 
@@ -172,7 +241,8 @@ async function sendMsg(messagesEl, inputEl, apiKey, imgBase64, imgMime, imgName,
   inputEl.value = ''; inputEl.style.height = 'auto';
   clearImg?.();
 
-  conversationHistory.push({ role:'user', text: displayText });
+  const history = conversationHistory;
+  const turn = { role: 'user', text: displayText };
 
   // Loading bubble
   const loadId = `load-${uid()}`;
@@ -183,27 +253,22 @@ async function sendMsg(messagesEl, inputEl, apiKey, imgBase64, imgMime, imgName,
   scrollBottom(messagesEl);
 
   try {
-    let response;
-
     if (imgBase64) {
       // If image attached: use OCR then respond
-      const ocrText = await extractTextFromImage(apiKey, imgBase64, imgMime);
-      const prompt  = text
+      const ocrText = await extractTextFromImage(imgBase64, imgMime);
+      turn.text = text
         ? `${text}\n\n[نص مستخرج من الصورة]:\n${ocrText}`
         : `شرح محتوى هذه الصورة:\n${ocrText}`;
-      conversationHistory[conversationHistory.length-1].text = prompt;
-      response = await geminiChat(apiKey, conversationHistory, subjectContextCache);
-    } else {
-      response = await geminiChat(apiKey, conversationHistory, subjectContextCache);
     }
 
-    conversationHistory.push({ role:'assistant', text: response });
+    const response = await studyChat([...history, turn], context);
+    history.push(turn, { role:'assistant', text: response });
     document.getElementById(loadId)?.remove();
     appendBubble(messagesEl, 'ai', response);
   } catch (err) {
     document.getElementById(loadId)?.remove();
     appendBubble(messagesEl, 'ai', `❌ خطأ: ${err.message}`, true);
-    showToast(`خطأ في Gemini: ${err.message}`, 'error', 7000);
+    showToast(`تعذّر استخدام المساعد: ${err.message}`, 'error', 7000);
   }
   scrollBottom(messagesEl);
 }

@@ -21,12 +21,7 @@ import { renderStudy }         from './views/study.js';
 import { renderReviews }       from './views/reviews.js';
 import { renderPomodoro, resetStudyTimer } from './views/pomodoro.js';
 import { renderSettings }      from './views/settings.js';
-import { renderChat }          from './views/chat.js';
-
-/* ─── Global app state (readable by other modules) ────────── */
-window.__appState = {
-  apiKey: '',
-};
+import { renderChat, resetChat } from './views/chat.js';
 
 /* ─── Route definitions ────────────────────────────────────── */
 const ROUTES = [
@@ -77,6 +72,7 @@ async function init() {
     } else {
       routeVersion++;
       resetStudyTimer();
+      resetChat();
       _appStarted = false;
       document.getElementById('app')?.classList.add('hidden');
       document.getElementById('loading-screen')?.classList.add('fade-out');
@@ -91,12 +87,7 @@ async function init() {
 
 async function startApp() {
   // Load persisted settings (per-account, from Firestore)
-  const [apiKey, savedTheme] = await Promise.all([
-    settingsDB.get('geminiApiKey'),
-    settingsDB.get('theme'),
-  ]);
-
-  if (apiKey)     window.__appState.apiKey = apiKey;
+  const savedTheme = await settingsDB.get('theme');
   if (savedTheme) document.body.dataset.theme = savedTheme;
 
   // Reveal the app

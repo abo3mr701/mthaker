@@ -2,8 +2,9 @@
  * subject-detail.js — Single subject: files, AI generation, flashcard management
  */
 
-import { subjects as subjectsDB, flashcards as cardsDB, files as filesDB, settings } from '../db.js';
-import { generateFlashcards, extractTextFromImage } from '../services/gemini.js';
+import { subjects as subjectsDB, flashcards as cardsDB, files as filesDB } from '../db.js';
+import { generateFlashcards, extractTextFromImage } from '../services/studyAI.js';
+import { requirePuterConnection } from '../services/puterAI.js';
 import { extractFileContent, needsVisionOCR, validateFile } from '../services/extractor.js';
 import { buildCard, stageLabel } from '../services/srs.js';
 import { refreshSubjectCardCount } from './subjects.js';
@@ -167,9 +168,10 @@ function bindFilesTab(container, subject, subjectFiles, cards) {
 async function handleFiles(rawFiles, container, subject, existingFiles, existingCards) {
   if (!rawFiles || rawFiles.length === 0) return;
 
-  const apiKey = await settings.get('geminiApiKey');
-  if (!apiKey) {
-    showToast('أدخل مفتاح Gemini API في الإعدادات أولاً', 'warning', 5000);
+  try {
+    await requirePuterConnection();
+  } catch (error) {
+    showToast(error.message, 'warning', 7000);
     return;
   }
 
@@ -188,11 +190,11 @@ async function handleFiles(rawFiles, container, subject, existingFiles, existing
 
       let textContent = extraction.text || '';
 
-      // 2. If image, run Gemini Vision OCR
+      // 2. If image, run الذكاء الاصطناعي OCR
       if (needsVisionOCR(extraction)) {
         showAIStatus(container, `جاري استخراج النص من الصورة…`);
         try {
-          textContent = await extractTextFromImage(apiKey, extraction.base64, extraction.mimeType);
+          textContent = await extractTextFromImage(extraction.base64, extraction.mimeType);
         } catch (ocrErr) {
           showToast(`فشل OCR للصورة: ${ocrErr.message}`, 'warning');
           textContent = '';
@@ -216,7 +218,7 @@ async function handleFiles(rawFiles, container, subject, existingFiles, existing
       if (textContent.trim().length > 30) {
         showAIStatus(container, `جاري إنشاء البطاقات التعليمية بالذكاء الاصطناعي…`);
         try {
-          const rawCards = await generateFlashcards(apiKey, textContent, subject.name);
+          const rawCards = await generateFlashcards(textContent, subject.name);
           const newCards = rawCards.map(c => buildCard({
             front:     c.front,
             back:      c.back,

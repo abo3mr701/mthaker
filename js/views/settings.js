@@ -1,5 +1,5 @@
 /**
- * settings.js — Settings page: Gemini API key, SRS intervals, Pomodoro durations, data management
+ * settings.js — Settings page: SRS intervals, Pomodoro durations, data management
  */
 
 import {
@@ -8,15 +8,14 @@ import {
   restoreStudyBackup,
   clearAllUserData,
 } from '../db.js';
-import { validateApiKey } from '../services/gemini.js';
 import { getMaxDailyReviews, setMaxDailyReviews } from '../services/srs.js';
-import { showToast, showConfirm, escHtml } from '../utils/helpers.js';
+import { showToast, showConfirm } from '../utils/helpers.js';
 import { parseStudyBackup } from '../services/studyBackup.js';
 
 export async function renderSettings(container) {
   container.innerHTML = `<div class="flex-center" style="padding:var(--s10)"><div class="spinner"></div></div>`;
 
-  const [apiKey, maxDaily, studyMins, breakMins] = await Promise.all([
+  const [oldKey, maxDaily, studyMins, breakMins] = await Promise.all([
     settingsDB.get('geminiApiKey'),
     getMaxDailyReviews(),
     settingsDB.get('pomodoroStudy'),
@@ -31,35 +30,13 @@ export async function renderSettings(container) {
       </div>
     </div>
 
-    <!-- Gemini API Key -->
     <div class="settings-section">
       <div class="settings-section-title">
-        <span class="settings-section-icon">🤖</span> مفتاح Gemini API
+        <span class="settings-section-icon">🤖</span> الذكاء الاصطناعي
       </div>
-      <p class="text-muted text-sm mb-4">
-        مطلوب لإنشاء البطاقات تلقائياً من الملفات والمساعد الذكي.
-        احصل على مفتاح مجاني من
-        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener"
-           style="color:var(--primary);">Google AI Studio</a>.
-      </p>
-      <div class="form-group">
-        <label class="form-label" for="api-key-input">مفتاح API</label>
-        <div class="input-with-toggle" style="position:relative;">
-          <input type="password" class="form-input" id="api-key-input"
-            placeholder="AIza…"
-            value="${escHtml(apiKey || '')}"
-            autocomplete="off" dir="ltr">
-          <button class="input-toggle-btn" id="toggle-key-vis" title="إظهار/إخفاء">👁</button>
-        </div>
-        <span class="form-hint">يُحفظ المفتاح في إعدادات حسابك ويستخدمه المتصفح لإرسال طلبات Gemini.</span>
-      </div>
-      <div id="api-key-status"></div>
-      <div style="display:flex;gap:var(--s4);margin-top:var(--s5);">
-        <button class="btn btn-primary" id="validate-key-btn">
-          🔑 التحقق والحفظ
-        </button>
-        ${apiKey ? `<button class="btn btn-ghost" id="clear-key-btn">🗑️ حذف المفتاح</button>` : ''}
-      </div>
+      <p class="text-muted text-sm mb-4">اربط حساب Puter مرة واحدة من صفحة المساعد. الطلبات تُحتسب على حساب Puter الذي تختاره.</p>
+      <a class="btn btn-secondary btn-sm" href="#chat">فتح المساعد الذكي</a>
+      ${oldKey ? '<button class="btn btn-ghost btn-sm" id="clear-key-btn">حذف المفتاح المحفوظ سابقًا</button>' : ''}
     </div>
 
     <!-- Review algorithm settings -->
@@ -98,7 +75,7 @@ export async function renderSettings(container) {
       </div>
       <p class="text-muted text-sm mb-4">
         بيانات الدراسة مرتبطة بحسابك في Firebase. يمكنك تنزيل نسخة تشمل خطط المراجعة ومفردات الإنجليزية وسجل المذاكرة.
-        الاستعادة تضيف السجلات الناقصة وتُبقي السجلات الحالية. مفتاح Gemini خارج النسخة.
+        الاستعادة تضيف السجلات الناقصة وتُبقي السجلات الحالية. بيانات ربط المساعد خارج النسخة.
       </p>
       <div style="display:flex;gap:var(--s4);flex-wrap:wrap;">
         <button class="btn btn-secondary" id="export-data-btn">📤 تصدير البيانات (JSON)</button>
@@ -121,61 +98,25 @@ export async function renderSettings(container) {
     </div>
   `;
 
-  bindSettingsEvents(container, apiKey);
+  bindSettingsEvents(container);
 }
 
 /* ─── Event binding ───────────────────────────────────────── */
-function bindSettingsEvents(container, currentApiKey) {
-  const keyInput    = container.querySelector('#api-key-input');
-  const toggleBtn   = container.querySelector('#toggle-key-vis');
-  const validateBtn = container.querySelector('#validate-key-btn');
+function bindSettingsEvents(container) {
   const clearKeyBtn = container.querySelector('#clear-key-btn');
-
-  // Toggle API key visibility
-  toggleBtn?.addEventListener('click', () => {
-    const isPass = keyInput.type === 'password';
-    keyInput.type = isPass ? 'text' : 'password';
-    toggleBtn.textContent = isPass ? '🙈' : '👁';
-  });
-
-  // Validate & save API key
-  validateBtn?.addEventListener('click', async () => {
-    const key = keyInput.value.trim();
-    if (!key) { showToast('الرجاء إدخال مفتاح API', 'warning'); return; }
-
-    setApiStatus(container, 'checking');
-    validateBtn.disabled = true;
-
-    try {
-      const result = await validateApiKey(key);
-      if (result.valid) {
-        await settingsDB.set('geminiApiKey', key);
-        // Update app-level state only after storage succeeds.
-        if (window.__appState) window.__appState.apiKey = key;
-        setApiStatus(container, 'valid', result.model);
-        showToast('✅ تم التحقق من المفتاح وحفظه', 'success');
-      } else {
-        setApiStatus(container, result.kind === 'invalid_key' ? 'invalid' : 'error', result.error);
-        showToast(`فشل التحقق: ${result.error}`, 'error', 7000);
-      }
-    } catch {
-      setApiStatus(container, 'error', 'تعذّر حفظ المفتاح. تحقق من الاتصال وحاول مرة أخرى.');
-      showToast('تعذّر حفظ المفتاح', 'error');
-    } finally {
-      validateBtn.disabled = false;
-    }
-  });
-
-  // Clear API key
   clearKeyBtn?.addEventListener('click', async () => {
-    const ok = await showConfirm('حذف المفتاح', 'هل تريد حذف مفتاح Gemini API؟');
+    const ok = await showConfirm('حذف المفتاح القديم', 'هل تريد حذف المفتاح المحفوظ سابقًا من حسابك؟');
     if (!ok) return;
-    await settingsDB.set('geminiApiKey', '');
-    if (window.__appState) window.__appState.apiKey = '';
-    keyInput.value = '';
-    setApiStatus(container, null);
-    showToast('تم حذف المفتاح', 'info');
-    clearKeyBtn.remove();
+
+    clearKeyBtn.disabled = true;
+    try {
+      await settingsDB.set('geminiApiKey', '');
+      clearKeyBtn.remove();
+      showToast('تم حذف المفتاح القديم', 'success');
+    } catch {
+      showToast('تعذّر حذف المفتاح القديم. حاول مرة أخرى.', 'error');
+      clearKeyBtn.disabled = false;
+    }
   });
 
   // Max daily reviews
@@ -243,22 +184,6 @@ function bindSettingsEvents(container, currentApiKey) {
     }
   });
 
-  // Show current key status on load
-  if (currentApiKey) setApiStatus(container, 'saved');
-}
-
-function setApiStatus(container, state, errorMsg = '') {
-  const el = container.querySelector('#api-key-status');
-  if (!el) return;
-  if (!state) { el.innerHTML = ''; return; }
-  const labels = {
-    valid:    `✅ تم التحقق من الوصول وحفظ المفتاح${errorMsg ? ' — الموديل: ' + errorMsg : ''}. الحصة تُفحص عند الاستخدام.`,
-    saved:    '🔑 يوجد مفتاح محفوظ. اضغط «التحقق والحفظ» لفحص الوصول والموديل المتاح.',
-    invalid:  `❌ مفتاح غير صالح${errorMsg ? ': ' + errorMsg : ''}`,
-    error:    `⚠️ تعذّر التحقق${errorMsg ? ': ' + errorMsg : ''}`,
-    checking: '⏳ جاري التحقق وجلب الموديلات المتاحة…',
-  };
-  el.innerHTML = `<span class="api-status ${state}" role="status">${escHtml(labels[state] || '')}</span>`;
 }
 
 /* ─── Export all data as JSON download ───────────────────── */
