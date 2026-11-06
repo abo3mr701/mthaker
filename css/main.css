@@ -1641,6 +1641,21 @@ body.sidebar-collapsed .sidebar { display: none; }
 .focus-city { margin-top:var(--s5); }
 .focus-city-header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:var(--s3); margin-bottom:var(--s4); }
 .city-controls { display:flex; flex-wrap:wrap; gap:var(--s3); margin-bottom:var(--s4); }
+.city-fullscreen-toggle { margin-inline-start:auto; }
+.city-viewport.is-expanded { position:fixed; inset:0; z-index:450; }
+.city-viewport:fullscreen,
+.city-viewport.is-expanded {
+  display:flex; flex-direction:column;
+  padding:clamp(var(--s3),2vw,var(--s6));
+  overflow:auto; overscroll-behavior:contain;
+  background:var(--surface); color:var(--text1);
+}
+.city-viewport:fullscreen .focus-map,
+.city-viewport.is-expanded .focus-map { flex:1; min-block-size:8rem; }
+.city-viewport:fullscreen .city-scene,
+.city-viewport.is-expanded .city-scene { display:block; height:100%; aspect-ratio:auto; }
+body:has(.city-viewport.is-expanded) { overflow:hidden; }
+.view-container:has(.city-viewport.is-expanded) { animation:none; transform:none !important; }
 .city-pickers { display:grid; grid-template-columns:1fr 1.5fr; gap:var(--s4); margin-bottom:var(--s4); }
 .city-pickers label { display:grid; min-width:0; gap:var(--s2); }
 .city-pickers select { width:100%; }
@@ -1660,13 +1675,48 @@ body.sidebar-collapsed .sidebar { display: none; }
 .riyadh-road-label { font:700 7.5px var(--font); fill:#f7e5a5; stroke:#334254; stroke-width:2px; paint-order:stroke; }
 .riyadh-store-sign { font:700 3px system-ui,sans-serif; fill:#fff1d7; paint-order:stroke; stroke:#233845; stroke-width:.6; }
 .riyadh-lamp { opacity:0; }
-.focus-map[data-city-light="night"] { background:radial-gradient(ellipse at 50% 15%,#33465b,#101b2c); }
-[data-city-light="night"] .riyadh-urban-layer { filter:brightness(.56) saturate(.82); }
+.focus-map[data-city-light="night"] {
+  background:radial-gradient(ellipse at 45% 14%,#29435f,#152840 66%,#101d31);
+  --riyadh-terrain:#5a6d82;
+  --riyadh-edge-light:#465a71;
+  --riyadh-edge-shadow:#35475e;
+  --riyadh-lot-ground:#697f94;
+  --riyadh-plot:#738699;
+  --riyadh-curb:#8196a9;
+  --riyadh-asphalt:#27384e;
+  --riyadh-median:#86a69a;
+  --riyadh-lane-marking:#d5e3ee;
+  --riyadh-park:#6d8a7f;
+  --riyadh-path:#b4c4bf;
+  --riyadh-wadi-bank:#63877e;
+  --riyadh-water:#5b99ad;
+  --riyadh-foliage-0:#8bb397;
+  --riyadh-foliage-1:#578b76;
+  --riyadh-foliage-2:#3b6e60;
+  --riyadh-stone-0:#dad1bd;
+  --riyadh-stone-1:#b2b1ac;
+  --riyadh-stone-2:#8d98a4;
+  --riyadh-civic-0:#e5dac3;
+  --riyadh-civic-1:#bfb7a9;
+  --riyadh-civic-2:#929eae;
+  --riyadh-glass-0:#b9d4e9;
+  --riyadh-glass-1:#82a9c4;
+  --riyadh-glass-2:#6489ac;
+  --riyadh-blue-0:#abcbe0;
+  --riyadh-blue-1:#7499b6;
+  --riyadh-blue-2:#547890;
+  --riyadh-selection:#91c1cf;
+  --riyadh-lamp-post:#a5b9c8;
+}
 [data-city-light="night"] .riyadh-lamp { opacity:1; }
-[data-city-light="night"] .city-window.is-lit { fill:#ffe0a1; }
-[data-city-light="night"] .riyadh-lamp,
-[data-city-light="night"] .city-window.is-lit { filter:brightness(1.8); }
-[data-city-light="night"] .riyadh-map-label { fill:#e4e8e7; stroke:#263448; }
+[data-city-light="night"] .city-window { fill:#38536e; }
+[data-city-light="night"] .city-window.is-lit { fill:#ffe2a8; }
+[data-city-light="night"] .riyadh-blueprint { opacity:.26; }
+[data-city-light="night"] .riyadh-blueprint .city-window.is-lit { fill:#8ca8bf; }
+[data-city-light="night"] .riyadh-map-label { fill:#f1f5fc; stroke:#27384f; }
+[data-city-light="night"] .riyadh-road-label { fill:#ffebbe; stroke:#24364b; }
+[data-city-light="night"] .riyadh-pin { fill:#d5e6ed; stroke:#3b536d; }
+[data-city-light="night"] [aria-pressed="true"] > .riyadh-pin { fill:#ffe39b; stroke:#334865; }
 @media (prefers-reduced-motion:reduce) { .riyadh-vehicle { display:none; } }
 .riyadh-map-labels { pointer-events:none; }
 .focus-map.is-zoomed .riyadh-map-labels { display:none; }
@@ -1703,6 +1753,15 @@ body.sidebar-collapsed .sidebar { display: none; }
 @media (max-width:480px) {
   .city-pickers { grid-template-columns:1fr; }
   .city-pickers:has(#city-light-control:not([hidden])) { grid-template-columns:1fr; }
+  .city-viewport:is(:fullscreen,.is-expanded) .city-pickers {
+    grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--s3);
+  }
+  .city-viewport:is(:fullscreen,.is-expanded) .city-pickers:has(#city-light-control:not([hidden])) {
+    grid-template-areas:"world light" "landmark landmark";
+  }
+  .city-viewport:is(:fullscreen,.is-expanded) .city-pickers:has(#city-light-control:not([hidden])) label:has(#city-world) { grid-area:world; }
+  .city-viewport:is(:fullscreen,.is-expanded) .city-pickers:has(#city-light-control:not([hidden])) label:has(#city-landmark) { grid-area:landmark; }
+  .city-viewport:is(:fullscreen,.is-expanded) #city-light-control { grid-area:light; }
 }
 @font-face { font-family:Tajawal; src:url('./fonts/tajawal-regular.ttf') format('truetype'); font-weight:400; font-display:swap; }
 @font-face { font-family:Tajawal; src:url('./fonts/tajawal-bold.ttf') format('truetype'); font-weight:700; font-display:swap; }

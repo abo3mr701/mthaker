@@ -21,6 +21,7 @@ let cityLocations = [];
 let cityPaintKey = '';
 let cityLighting = 'auto';
 let lightingTimer = null;
+let clearCityFullscreen;
 const riyadhClock = new Intl.DateTimeFormat('en-GB', { timeZone:'Asia/Riyadh', hour:'2-digit', hourCycle:'h23' });
 let cityPulse = -1;
 let savedProjects = {};
@@ -34,6 +35,7 @@ function newTimer() {
 export function resetStudyTimer() {
   clearInterval(ticker);
   clearTimeout(lightingTimer);
+  clearCityFullscreen?.();
   owner = null;
   timer = newTimer();
   records = [];
@@ -209,6 +211,7 @@ export async function renderPomodoro(container) {
           <p id="city-description" class="text-muted"></p></div>
         <span id="focus-city-count" class="category-badge"></span>
       </div>
+      <div class="city-viewport" id="city-viewport">
       <div class="city-pickers">
         <label>المدينة <select id="city-world" class="form-select">${Object.entries(CITY_WORLDS).map(([id, world]) =>
           `<option value="${id}">${world.name}</option>`).join('')}</select></label>
@@ -224,9 +227,11 @@ export async function renderPomodoro(container) {
         <button type="button" class="btn btn-secondary btn-sm" id="city-left" aria-label="دوّر المدينة لليسار">↶ تدوير</button>
         <button type="button" class="btn btn-secondary btn-sm" id="city-right" aria-label="دوّر المدينة لليمين">تدوير ↷</button>
         <button type="button" class="btn btn-ghost btn-sm" id="city-overview">نظرة عامة</button>
+        <button type="button" class="btn btn-secondary btn-sm city-fullscreen-toggle" id="city-fullscreen" aria-controls="city-viewport" aria-pressed="false">ملء الشاشة</button>
       </div>
       <div id="focus-map" class="focus-map"></div>
-      <p class="text-muted text-xs city-help">اسحب الخريطة للتنقل عند التقريب. المجسّم مستوحى من المعالم الحقيقية بمواقع تقريبية. <a id="city-source" target="_blank" rel="noopener noreferrer">مصدر المعالم ↗</a></p>
+      </div>
+      <p class="text-muted text-xs city-help">استخدم عجلة الماوس للتقريب والإبعاد، واسحب الخريطة للتنقّل. المجسّم مستوحى من المعالم الحقيقية بمواقع تقريبية. <a id="city-source" target="_blank" rel="noopener noreferrer">مصدر المعالم ↗</a></p>
       <div id="focus-place" class="focus-place"></div>
     </section>`;
 
@@ -363,6 +368,7 @@ function bindCity(get) {
   get('city-in').addEventListener('click', () => zoomCity(CITY_FRAME[2] / cameraBox[2] * 1.45));
   get('city-out').addEventListener('click', () => zoomCity(CITY_FRAME[2] / cameraBox[2] / 1.45));
   get('city-overview').addEventListener('click', () => zoomCity(1));
+  bindCityFullscreen(get('city-viewport'), get('city-fullscreen'));
   [['city-left', -1], ['city-right', 1]].forEach(([id, delta]) => {
     get(id).addEventListener('click', () => {
       const zoom = CITY_FRAME[2] / cameraBox[2];
@@ -373,9 +379,28 @@ function bindCity(get) {
   });
   let drag = null;
   let suppressClick = false;
+  map.addEventListener('wheel', event => {
+    if (event.ctrlKey || event.metaKey || !event.deltaY || drag) return;
+    const rect = map.querySelector('svg').getBoundingClientRect();
+    const scale = Math.min(rect.width / cameraBox[2], rect.height / cameraBox[3]);
+    if (!scale) return;
+    const [x,y,width,height] = cameraBox;
+    const screenX = event.clientX - rect.left - (rect.width - width * scale) / 2;
+    const screenY = event.clientY - rect.top - (rect.height - height * scale) / 2;
+    if (screenX < 0 || screenX > width * scale || screenY < 0 || screenY > height * scale) return;
+    const current = CITY_FRAME[2] / width;
+    const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? rect.height : 1);
+    const next = Math.max(1, Math.min(7, current * Math.exp(-Math.max(-180, Math.min(180, delta)) * .0025)));
+    if (next === current) return;
+    event.preventDefault();
+    zoomCity(next, [x + screenX / scale, y + screenY / scale], [screenX / (width * scale), screenY / (height * scale)]);
+  }, { passive:false });
   map.addEventListener('pointerdown', event => {
     if (event.button !== 0 || cameraBox[2] === CITY_FRAME[2] || drag) return;
-    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, box: [...cameraBox] };
+    const rect = map.querySelector('svg').getBoundingClientRect();
+    const scale = Math.min(rect.width / cameraBox[2], rect.height / cameraBox[3]);
+    if (!scale) return;
+    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, box: [...cameraBox], scale };
     suppressClick = false;
   });
   map.addEventListener('pointermove', event => {
@@ -384,9 +409,8 @@ function bindCity(get) {
     if (!suppressClick && Math.hypot(dx, dy) < 5) return;
     suppressClick = true;
     map.setPointerCapture(event.pointerId);
-    const scale = drag.box[2] / map.clientWidth;
-    cameraBox[0] = drag.box[0] - dx * scale;
-    cameraBox[1] = drag.box[1] - dy * scale;
+    cameraBox[0] = drag.box[0] - dx / drag.scale;
+    cameraBox[1] = drag.box[1] - dy / drag.scale;
     applyCamera();
   });
   const endDrag = event => { if (drag?.id === event.pointerId) drag = null; };
@@ -405,16 +429,58 @@ function bindCity(get) {
   });
 }
 
+function bindCityFullscreen(viewport, button) {
+  clearCityFullscreen?.();
+  const doc = viewport.ownerDocument;
+  const expanded = () => doc.fullscreenElement === viewport || viewport.classList.contains('is-expanded');
+  function sync() {
+    const active = expanded();
+    button.setAttribute('aria-pressed', String(active));
+    button.textContent = active ? 'خروج من ملء الشاشة' : 'ملء الشاشة';
+  }
+  function escape(event) {
+    if (event.key === 'Escape' && viewport.isConnected && viewport.classList.contains('is-expanded')) {
+      viewport.classList.remove('is-expanded');
+      sync();
+      button.focus();
+    }
+  }
+  doc.addEventListener('fullscreenchange', sync);
+  doc.addEventListener('keydown', escape);
+  clearCityFullscreen = () => {
+    doc.removeEventListener('fullscreenchange', sync);
+    doc.removeEventListener('keydown', escape);
+    viewport.classList.remove('is-expanded');
+    if (doc.fullscreenElement === viewport) doc.exitFullscreen().catch(() => {});
+    clearCityFullscreen = null;
+  };
+  button.addEventListener('click', async () => {
+    if (doc.fullscreenElement === viewport) {
+      await doc.exitFullscreen();
+    } else if (viewport.classList.contains('is-expanded')) {
+      viewport.classList.remove('is-expanded');
+    } else {
+      try {
+        if (viewport.requestFullscreen) await viewport.requestFullscreen();
+        else viewport.classList.add('is-expanded');
+      } catch {
+        if (viewport.isConnected) viewport.classList.add('is-expanded');
+      }
+    }
+    sync();
+  });
+}
+
 function paintCityLight(map) {
   const hour = Number(riyadhClock.format(new Date()));
   map.dataset.cityLight = worldId === 'riyadh' && (cityLighting === 'night'
     || cityLighting === 'auto' && (hour < 6 || hour >= 18)) ? 'night' : 'day';
 }
 
-function zoomCity(zoom, center = [cameraBox[0] + cameraBox[2] / 2, cameraBox[1] + cameraBox[3] / 2]) {
+function zoomCity(zoom, anchor = [cameraBox[0] + cameraBox[2] / 2, cameraBox[1] + cameraBox[3] / 2], position = [.5,.5]) {
   zoom = Math.max(1, Math.min(7, zoom));
   const width = CITY_FRAME[2] / zoom, height = CITY_FRAME[3] / zoom;
-  cameraBox = [center[0] - width / 2, center[1] - height / 2, width, height];
+  cameraBox = [anchor[0] - width * position[0], anchor[1] - height * position[1], width, height];
   applyCamera();
 }
 
