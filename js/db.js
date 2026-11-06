@@ -86,13 +86,14 @@ async function bulkPutDocs(name, records) {
   return records;
 }
 
-async function bulkDeleteDocs(name, ids) {
+async function bulkDeleteDocs(name, ids, onDeleted) {
   const c = col(name);
   for (let i = 0; i < ids.length; i += 400) {
     const chunk = ids.slice(i, i + 400);
     const batch = writeBatch(firestore);
     chunk.forEach(id => batch.delete(doc(c, String(id))));
     await batch.commit();
+    onDeleted?.(chunk);
   }
 }
 
@@ -125,6 +126,7 @@ export const flashcards = {
   getByPlan:       (planId)      => getByIndexDocs(COLLECTIONS.CARDS, 'planId', planId),
   save:            (card)        => putDoc(COLLECTIONS.CARDS, card),
   delete:          (id)          => delDoc(COLLECTIONS.CARDS, id),
+  bulkDelete:      (ids, onDeleted) => bulkDeleteDocs(COLLECTIONS.CARDS, ids, onDeleted),
 
   // subjectId: null/'', or '_' (any subject) | category: null = all categories
   getDueCards: async (subjectId = null, category = null) => {
@@ -211,6 +213,52 @@ export const reviewPlans = {
   getById:      (id)        => getByIdDoc(COLLECTIONS.PLANS, id),
   getBySubject: (subjectId) => getByIndexDocs(COLLECTIONS.PLANS, 'subjectId', subjectId),
   save:         (plan)      => putDoc(COLLECTIONS.PLANS, plan),
+  finish: async (plan, reviewId) => {
+    const planRef = doc(col(COLLECTIONS.PLANS), plan.id);
+    const cards = col(COLLECTIONS.CARDS);
+    const today = localStudyDay();
+    const linked = await getByIndexDocs(COLLECTIONS.CARDS, 'planId', plan.id);
+    if (linked.some(card => !card.nextReview || card.nextReview <= today)) {
+      throw Object.assign(new Error('Lesson cards are due'), { code: 'lesson-cards-due' });
+    }
+    const removed = linked.slice(0, 399);
+    const pending = linked.slice(399).map(card => card.id);
+    const completedAt = plan.reviews.find(review => review.id === reviewId)?.completedAt;
+    await runTransaction(firestore, async tx => {
+      const snap = await tx.get(planRef);
+      const reviews = snap.data()?.reviews || [];
+      const outstanding = reviews.filter(review => !review.done);
+      if (!completedAt || outstanding.length !== 1 || outstanding[0].id !== reviewId || outstanding[0].dueDate !== today) {
+        throw new Error('Lesson review changed');
+      }
+      removed.forEach(card => tx.delete(doc(cards, card.id)));
+      tx.update(planRef, {
+        reviews: reviews.map(review => review.id === reviewId ? { ...review, done: true, completedAt } : review),
+        pendingCardCleanup: pending,
+      });
+    });
+    return { removed, pending };
+  },
+  cleanupFinishedCards: async plan => {
+    const ids = new Set(plan.pendingCardCleanup || []);
+    if (!ids.size) return [];
+    const userId = requireUid();
+    const planRef = doc(col(COLLECTIONS.PLANS), plan.id);
+    const stored = (await getDoc(planRef)).data()?.pendingCardCleanup;
+    if (stored?.length !== ids.size || !stored.every(id => ids.has(id))) return [];
+    if (requireUid() !== userId) throw new Error('Active account changed');
+    const linked = await getByIndexDocs(COLLECTIONS.CARDS, 'planId', plan.id);
+    const remaining = linked.filter(card => ids.has(card.id));
+    if (requireUid() !== userId) throw new Error('Active account changed');
+    await bulkDeleteDocs(COLLECTIONS.CARDS, remaining.map(card => card.id));
+    await runTransaction(firestore, async tx => {
+      const current = (await tx.get(planRef)).data()?.pendingCardCleanup;
+      if (current?.length === ids.size && current.every(id => ids.has(id))) {
+        tx.update(planRef, { pendingCardCleanup: [] });
+      }
+    });
+    return remaining;
+  },
   move: async (plan, linkedCards) => {
     const batch = writeBatch(firestore);
     batch.set(doc(col(COLLECTIONS.PLANS), plan.id), plan);

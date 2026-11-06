@@ -77,10 +77,10 @@
 
       <div class="sidebar-foot">
         <a href="#settings" class="nav-link" data-view="settings">
-          <span class="nav-icon">&#x2699;</span><span>الإعدادات</span>
+          <span class="nav-icon" aria-hidden="true">&#x2699;</span><span>الإعدادات</span>
         </a>
-        <button class="nav-link" id="sign-out-btn">
-          <span class="nav-icon">&#x1F6AA;</span><span id="sign-out-label">تسجيل الخروج</span>
+        <button type="button" class="nav-link" id="sign-out-btn">
+          <span class="nav-icon" aria-hidden="true">&#x1F6AA;</span><span id="sign-out-label">تسجيل الخروج</span>
         </button>
       </div>
     </nav>
@@ -126,9 +126,10 @@
   <div id="toasts" class="toast-stack" aria-live="assertive" aria-atomic="false"></div>
 
   <!-- ── Confirm Dialog ─────────────────────────────────── -->
-  <div id="modal-confirm" class="modal-backdrop hidden" role="dialog" aria-modal="true">
-    <div class="modal-box modal-sm">
-      <h3 class="modal-title" id="confirm-title">تأكيد</h3>
+  <div id="modal-confirm" class="modal-backdrop hidden" role="dialog" aria-modal="true"
+    aria-labelledby="confirm-title" aria-describedby="confirm-msg">
+    <div class="modal-box modal-sm modal-confirm-box">
+      <div class="modal-head"><h3 class="modal-title" id="confirm-title">تأكيد</h3></div>
       <p class="modal-msg" id="confirm-msg"></p>
       <div class="modal-btns">
         <button class="btn btn-danger" id="confirm-yes">تأكيد</button>

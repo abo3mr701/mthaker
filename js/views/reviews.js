@@ -27,6 +27,9 @@ export async function renderReviews(container) {
       cardsDB.getAll(),
       loadMaxDaily(),
     ]);
+    for (const plan of _allPlans.filter(plan => plan.pendingCardCleanup?.length)) {
+      try { await finishPendingCleanup(plan); } catch { /* Retry when reopening the page. */ }
+    }
     await saveSchedule();
   } catch (err) {
     container.innerHTML = `<div class="empty-state"><p class="text-danger">خطأ: ${err.message}</p></div>`;
@@ -41,20 +44,33 @@ async function loadMaxDaily() {
   return planLimit(await settings.get('reviewsMaxDaily'));
 }
 
-async function saveSchedule(plans = _allPlans, editedId, limit = _maxDaily) {
+async function saveSchedule(plans = _allPlans, editedId, limit = _maxDaily, saveEdited = plansDB.save) {
   if (savingSchedule) throw new Error('Review schedule is being saved');
   const result = scheduleReviewPlans(plans, todayStr(), limit);
   const changed = new Set(result.changed.map(plan => plan.id));
-  if (editedId) changed.add(editedId);
   savingSchedule = true;
   try {
     for (const plan of result.plans) {
-      if (changed.has(plan.id)) await plansDB.save(plan);
+      if (plan.id !== editedId && changed.has(plan.id)) await plansDB.save(plan);
     }
+    if (editedId) await saveEdited(result.plans.find(plan => plan.id === editedId));
     _allPlans = result.plans;
   } finally {
     savingSchedule = false;
   }
+}
+
+async function removeFromReviewList(cards) {
+  const ids = new Set(cards.map(card => card.id));
+  _allCards = _allCards.filter(card => !ids.has(card.id));
+  const subjects = new Set(cards.map(card => card.subjectId).filter(Boolean));
+  await Promise.all([...subjects].map(refreshSubjectCardCount));
+}
+
+async function finishPendingCleanup(plan) {
+  const removed = await plansDB.cleanupFinishedCards(plan);
+  await removeFromReviewList(removed);
+  plan.pendingCardCleanup = [];
 }
 
 function renderUI(container) {
@@ -308,13 +324,36 @@ async function toggleReview(container, planId, reviewId) {
 
   const updated = { ...rev, done: !rev.done, completedAt: !rev.done ? new Date().toISOString() : null };
   const updatedPlan = { ...plan, reviews: plan.reviews.map(r => r.id === reviewId ? updated : r) };
+  const isFinal = updated.done && updatedPlan.reviews.every(review => review.done);
   savingReview = true;
   try {
-    await saveSchedule(_allPlans.map(p => p.id === planId ? updatedPlan : p), planId);
+    if (isFinal && _allCards.some(card => card.planId === planId)) {
+      if (!await showConfirm('إكمال آخر مراجعة', 'عند إكمال خطة الدرس، تُحذف بطاقاته نهائيًا. يبقى الدرس وسجل المراجعات. هل تريد الإكمال؟')) return;
+    }
+    let removed = [];
+    await saveSchedule(_allPlans.map(p => p.id === planId ? updatedPlan : p), planId, _maxDaily,
+      isFinal ? async scheduled => {
+        const result = await plansDB.finish(scheduled, reviewId);
+        removed = result.removed;
+        scheduled.pendingCardCleanup = result.pending;
+      } : plansDB.save);
+    if (isFinal) {
+      await removeFromReviewList(removed);
+      const completed = _allPlans.find(item => item.id === planId);
+      if (completed.pendingCardCleanup.length) {
+        try { await finishPendingCleanup(completed); } catch {
+          renderUI(container);
+          showToast('اكتملت الخطة. سنعيد محاولة حذف البطاقات المتبقية عند فتح المراجعات.', 'warning');
+          return;
+        }
+      }
+    }
     renderUI(container);
-    showToast(updated.done ? 'تم تسجيل المراجعة ✓' : 'تم إلغاء التحديد', 'success', 1800);
-  } catch {
-    showToast('تعذّر حفظ المراجعة. حاول مرة أخرى.', 'error');
+    showToast(isFinal ? 'اكتملت خطة الدرس وانتهت مراجعة بطاقاته' : updated.done ? 'تم تسجيل المراجعة ✓' : 'تم إلغاء التحديد', 'success', 1800);
+  } catch (error) {
+    showToast(error.code === 'lesson-cards-due'
+      ? 'ظهرت بطاقات مستحقة لهذا الدرس. افتح المراجعات من جديد لإكمالها.'
+      : 'تعذّر حفظ المراجعة. حاول مرة أخرى.', 'error');
   } finally {
     savingReview = false;
   }
